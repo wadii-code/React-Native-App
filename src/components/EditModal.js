@@ -10,6 +10,8 @@ import {
   KeyboardAvoidingView,
   Platform,
   StyleSheet,
+  FlatList,
+  Keyboard,
 } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import { PRIORITIES, CATEGORIES } from '../theme';
@@ -22,6 +24,13 @@ const DUE_OPTIONS = [
   { id: 'nextWeek', label: 'Next week', getValue: () => addDays(startOfToday(), 7) },
 ];
 
+const RECURRENCE_OPTIONS = [
+  { id: null, label: 'None' },
+  { id: 'daily', label: 'Daily' },
+  { id: 'weekly', label: 'Weekly' },
+  { id: 'monthly', label: 'Monthly' },
+];
+
 function getDueId(dueDate) {
   if (!dueDate) return 'none';
   const today = startOfToday();
@@ -31,15 +40,25 @@ function getDueId(dueDate) {
   return 'none';
 }
 
+function generateId() {
+  return Date.now().toString(36) + Math.random().toString(36).substring(2, 9);
+}
+
 export default function EditModal({ task, onSave, onDelete, onClose, theme }) {
   const [text, setText] = useState('');
   const [priorityId, setPriorityId] = useState('none');
   const [categoryId, setCategoryId] = useState(null);
   const [dueId, setDueId] = useState('none');
+  const [notes, setNotes] = useState('');
+  const [subtasks, setSubtasks] = useState([]);
+  const [newSubtaskText, setNewSubtaskText] = useState('');
+  const [recurrenceId, setRecurrenceId] = useState(null);
+  const [expandedSection, setExpandedSection] = useState(null);
   const slideAnim = useRef(new Animated.Value(300)).current;
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const inputRef = useRef(null);
   const focusTimer = useRef(null);
+  const subtaskInputRef = useRef(null);
 
   useEffect(() => {
     return () => {
@@ -53,6 +72,10 @@ export default function EditModal({ task, onSave, onDelete, onClose, theme }) {
       setPriorityId(task.priority || 'none');
       setCategoryId(task.category || null);
       setDueId(getDueId(task.dueDate));
+      setNotes(task.notes || '');
+      setSubtasks(task.subtasks ? [...task.subtasks] : []);
+      setRecurrenceId(task.recurrence || null);
+      setExpandedSection(null);
       Animated.parallel([
         Animated.spring(slideAnim, { toValue: 0, damping: 20, stiffness: 200, useNativeDriver: true }),
         Animated.timing(fadeAnim, { toValue: 1, duration: 200, useNativeDriver: true }),
@@ -82,6 +105,9 @@ export default function EditModal({ task, onSave, onDelete, onClose, theme }) {
       priority: priorityId,
       category: categoryId,
       dueDate: dueOpt ? dueOpt.getValue() : null,
+      notes,
+      subtasks,
+      recurrence: recurrenceId,
     });
     handleClose();
   };
@@ -93,7 +119,36 @@ export default function EditModal({ task, onSave, onDelete, onClose, theme }) {
     handleClose();
   };
 
+  const handleAddSubtask = () => {
+    if (!newSubtaskText.trim()) return;
+    Haptics.selectionAsync();
+    setSubtasks((prev) => [
+      ...prev,
+      { id: generateId(), text: newSubtaskText.trim(), done: false },
+    ]);
+    setNewSubtaskText('');
+  };
+
+  const handleToggleSubtask = (subtaskId) => {
+    Haptics.selectionAsync();
+    setSubtasks((prev) =>
+      prev.map((st) => (st.id === subtaskId ? { ...st, done: !st.done } : st))
+    );
+  };
+
+  const handleDeleteSubtask = (subtaskId) => {
+    Haptics.selectionAsync();
+    setSubtasks((prev) => prev.filter((st) => st.id !== subtaskId));
+  };
+
+  const toggleSection = (section) => {
+    Haptics.selectionAsync();
+    setExpandedSection((prev) => (prev === section ? null : section));
+  };
+
   if (!task) return null;
+
+  const completedSubtasks = subtasks.filter((st) => st.done).length;
 
   return (
     <Modal visible={!!task} transparent animationType="none" onRequestClose={handleClose}>
@@ -236,6 +291,137 @@ export default function EditModal({ task, onSave, onDelete, onClose, theme }) {
                 </TouchableOpacity>
               ))}
             </View>
+
+            <TouchableOpacity
+              onPress={() => toggleSection('recurrence')}
+              style={[s.sectionToggle, { backgroundColor: theme.colors.inputBg }]}
+            >
+              <Text style={[s.sectionToggleText, { color: theme.colors.text }]}>
+                ↻ Recurrence {recurrenceId ? `(${RECURRENCE_OPTIONS.find((r) => r.id === recurrenceId)?.label})` : ''}
+              </Text>
+              <Text style={[s.sectionToggleArrow, { color: theme.colors.textSecondary }]}>
+                {expandedSection === 'recurrence' ? '▾' : '▸'}
+              </Text>
+            </TouchableOpacity>
+            {expandedSection === 'recurrence' && (
+              <View style={s.row}>
+                {RECURRENCE_OPTIONS.map((r) => (
+                  <TouchableOpacity
+                    key={r.id || 'none'}
+                    onPress={() => { Haptics.selectionAsync(); setRecurrenceId(r.id); }}
+                    style={[
+                      s.selectBtn,
+                      {
+                        backgroundColor:
+                          recurrenceId === r.id ? theme.colors.primaryLight : theme.colors.inputBg,
+                        borderColor: recurrenceId === r.id ? theme.colors.primary : theme.colors.border,
+                      },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        s.selectText,
+                        {
+                          color: recurrenceId === r.id ? theme.colors.primary : theme.colors.textSecondary,
+                          fontWeight: recurrenceId === r.id ? '600' : '400',
+                        },
+                      ]}
+                    >
+                      {r.label}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            )}
+
+            <TouchableOpacity
+              onPress={() => toggleSection('notes')}
+              style={[s.sectionToggle, { backgroundColor: theme.colors.inputBg }]}
+            >
+              <Text style={[s.sectionToggleText, { color: theme.colors.text }]}>
+                📝 Notes {notes ? '(has content)' : ''}
+              </Text>
+              <Text style={[s.sectionToggleArrow, { color: theme.colors.textSecondary }]}>
+                {expandedSection === 'notes' ? '▾' : '▸'}
+              </Text>
+            </TouchableOpacity>
+            {expandedSection === 'notes' && (
+              <TextInput
+                style={[s.notesInput, { color: theme.colors.text, backgroundColor: theme.colors.inputBg, borderColor: theme.colors.border }]}
+                value={notes}
+                onChangeText={setNotes}
+                placeholder="Add notes..."
+                placeholderTextColor={theme.colors.textTertiary}
+                multiline
+                numberOfLines={4}
+                textAlignVertical="top"
+              />
+            )}
+
+            <TouchableOpacity
+              onPress={() => toggleSection('subtasks')}
+              style={[s.sectionToggle, { backgroundColor: theme.colors.inputBg }]}
+            >
+              <Text style={[s.sectionToggleText, { color: theme.colors.text }]}>
+                ☑ Subtasks {subtasks.length > 0 ? `(${completedSubtasks}/${subtasks.length})` : ''}
+              </Text>
+              <Text style={[s.sectionToggleArrow, { color: theme.colors.textSecondary }]}>
+                {expandedSection === 'subtasks' ? '▾' : '▸'}
+              </Text>
+            </TouchableOpacity>
+            {expandedSection === 'subtasks' && (
+              <View>
+                {subtasks.map((st) => (
+                  <View key={st.id} style={[s.subtaskRow, { borderBottomColor: theme.colors.border }]}>
+                    <TouchableOpacity
+                      onPress={() => handleToggleSubtask(st.id)}
+                      style={[
+                        s.subtaskCheckbox,
+                        {
+                          borderColor: st.done ? theme.colors.success : theme.colors.border,
+                          backgroundColor: st.done ? theme.colors.success : 'transparent',
+                        },
+                      ]}
+                    >
+                       {st.done && <Text style={s.checkmarkSmall}>✓</Text>}
+                    </TouchableOpacity>
+                    <Text
+                      style={[
+                        s.subtaskText,
+                        {
+                          color: st.done ? theme.colors.textTertiary : theme.colors.text,
+                          textDecorationLine: st.done ? 'line-through' : 'none',
+                        },
+                      ]}
+                    >
+                      {st.text}
+                    </Text>
+                    <TouchableOpacity onPress={() => handleDeleteSubtask(st.id)}>
+                      <Text style={[s.subtaskDelete, { color: theme.colors.danger }]}>✕</Text>
+                    </TouchableOpacity>
+                  </View>
+                ))}
+                <View style={s.addSubtaskRow}>
+                  <TextInput
+                    ref={subtaskInputRef}
+                    style={[s.subtaskInput, { color: theme.colors.text, backgroundColor: theme.colors.inputBg, borderColor: theme.colors.border }]}
+                    value={newSubtaskText}
+                    onChangeText={setNewSubtaskText}
+                    placeholder="Add subtask..."
+                    placeholderTextColor={theme.colors.textTertiary}
+                    returnKeyType="done"
+                    onSubmitEditing={handleAddSubtask}
+                  />
+                  <TouchableOpacity
+                    onPress={handleAddSubtask}
+                    style={[s.addSubtaskBtn, { backgroundColor: newSubtaskText.trim() ? theme.colors.primary : theme.colors.chip }]}
+                    disabled={!newSubtaskText.trim()}
+                  >
+                    <Text style={[s.addSubtaskBtnText, { color: newSubtaskText.trim() ? '#FFF' : theme.colors.textTertiary }]}>+</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            )}
           </ScrollView>
 
           <View style={s.actions}>
@@ -365,6 +551,79 @@ const s = StyleSheet.create({
     fontSize: 13,
     fontWeight: '500',
   },
+  sectionToggle: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderRadius: 10,
+    marginBottom: 12,
+  },
+  sectionToggleText: {
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  sectionToggleArrow: {
+    fontSize: 14,
+  },
+  notesInput: {
+    borderRadius: 12,
+    borderWidth: 1,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    fontSize: 14,
+    marginBottom: 16,
+    minHeight: 100,
+  },
+  subtaskRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 10,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  subtaskCheckbox: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    borderWidth: 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 10,
+  },
+  subtaskText: {
+    flex: 1,
+    fontSize: 14,
+  },
+  subtaskDelete: {
+    fontSize: 14,
+    fontWeight: '600',
+    paddingLeft: 10,
+  },
+  addSubtaskRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 8,
+  },
+  subtaskInput: {
+    flex: 1,
+    height: 40,
+    borderRadius: 10,
+    borderWidth: 1,
+    paddingHorizontal: 12,
+    fontSize: 14,
+  },
+  addSubtaskBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  addSubtaskBtnText: {
+    fontSize: 20,
+    fontWeight: '600',
+  },
   actions: {
     flexDirection: 'row',
     marginTop: 8,
@@ -403,5 +662,10 @@ const s = StyleSheet.create({
   saveBtnText: {
     fontSize: 15,
     fontWeight: '600',
+  },
+  checkmarkSmall: {
+    color: '#FFF',
+    fontSize: 11,
+    fontWeight: '700',
   },
 });

@@ -29,6 +29,8 @@ if (UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
 }
 
+const PRIORITY_ORDER = { high: 0, medium: 1, low: 2, none: 3 };
+
 export default function App() {
   const { theme, isDark, toggleTheme } = useTheme();
   const {
@@ -39,10 +41,22 @@ export default function App() {
     editTask,
     deleteTask,
     toggleTask,
+    toggleSubtask,
+    addSubtask,
+    deleteSubtask,
     restoreTask,
+    selectionMode,
+    selectedIds,
+    toggleSelectionMode,
+    toggleSelection,
+    selectAll,
+    deselectAll,
+    bulkDelete,
+    bulkComplete,
   } = useTasks();
 
   const [filter, setFilter] = useState('all');
+  const [sortBy, setSortBy] = useState('created');
   const [searchQuery, setSearchQuery] = useState('');
   const [editingTask, setEditingTask] = useState(null);
   const [toast, setToast] = useState(null);
@@ -62,7 +76,8 @@ export default function App() {
       result = result.filter(
         (t) =>
           t.text.toLowerCase().includes(q) ||
-          (t.category && t.category.toLowerCase().includes(q))
+          (t.category && t.category.toLowerCase().includes(q)) ||
+          (t.notes && t.notes.toLowerCase().includes(q))
       );
     }
 
@@ -71,17 +86,32 @@ export default function App() {
 
     result = [...result].sort((a, b) => {
       if (a.done !== b.done) return a.done ? 1 : -1;
+
       const aOverdue = a.dueDate && isPast(a.dueDate) && !a.done;
       const bOverdue = b.dueDate && isPast(b.dueDate) && !b.done;
       if (aOverdue !== bOverdue) return aOverdue ? -1 : 1;
-      if (a.dueDate && b.dueDate) return a.dueDate - b.dueDate;
-      if (a.dueDate) return -1;
-      if (b.dueDate) return 1;
-      return b.createdAt - a.createdAt;
+
+      switch (sortBy) {
+        case 'dueDate':
+          if (a.dueDate && b.dueDate) return a.dueDate - b.dueDate;
+          if (a.dueDate) return -1;
+          if (b.dueDate) return 1;
+          return b.createdAt - a.createdAt;
+        case 'priority':
+          const pa = PRIORITY_ORDER[a.priority] ?? 3;
+          const pb = PRIORITY_ORDER[b.priority] ?? 3;
+          if (pa !== pb) return pa - pb;
+          return b.createdAt - a.createdAt;
+        case 'alpha':
+          return a.text.localeCompare(b.text);
+        case 'created':
+        default:
+          return b.createdAt - a.createdAt;
+      }
     });
 
     return result;
-  }, [tasks, filter, searchQuery]);
+  }, [tasks, filter, searchQuery, sortBy]);
 
   const showToast = useCallback((message, taskId) => {
     if (toastTimer.current) clearTimeout(toastTimer.current);
@@ -120,6 +150,28 @@ export default function App() {
     [toggleTask]
   );
 
+  const handleBulkDelete = useCallback(() => {
+    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+    bulkDelete();
+    showToast(`${selectedIds.size} tasks deleted`, null);
+  }, [bulkDelete, selectedIds, showToast]);
+
+  const handleBulkComplete = useCallback(() => {
+    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    bulkComplete();
+  }, [bulkComplete]);
+
+  const handleSelectAll = useCallback(() => {
+    Haptics.selectionAsync();
+    if (selectedIds.size === filteredTasks.length) {
+      deselectAll();
+    } else {
+      selectAll(filteredTasks.map((t) => t.id));
+    }
+  }, [selectedIds, filteredTasks, selectAll, deselectAll]);
+
   if (!loaded) {
     return (
       <View style={[styles.loading, { backgroundColor: theme.colors.background }]}>
@@ -137,9 +189,54 @@ export default function App() {
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         keyboardVerticalOffset={0}
       >
-        <Header theme={theme} isDark={isDark} onToggleTheme={toggleTheme} stats={stats} />
-        <SearchBar theme={theme} query={searchQuery} onChange={setSearchQuery} />
-        <FilterBar theme={theme} filter={filter} setFilter={setFilter} stats={stats} />
+        {selectionMode ? (
+          <View style={[styles.selectionHeader, { backgroundColor: theme.colors.surface, borderBottomColor: theme.colors.border }]}>
+            <TouchableOpacity onPress={handleSelectAll} style={styles.selectionBtn}>
+              <Text style={[styles.selectionBtnText, { color: theme.colors.primary }]}>
+                {selectedIds.size === filteredTasks.length ? 'Deselect All' : 'Select All'}
+              </Text>
+            </TouchableOpacity>
+            <Text style={[styles.selectionCount, { color: theme.colors.text }]}>
+              {selectedIds.size} selected
+            </Text>
+            <TouchableOpacity onPress={toggleSelectionMode} style={styles.selectionBtn}>
+              <Text style={[styles.selectionBtnText, { color: theme.colors.danger }]}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        ) : (
+          <Header theme={theme} isDark={isDark} onToggleTheme={toggleTheme} stats={stats} />
+        )}
+
+        {selectionMode && selectedIds.size > 0 && (
+          <View style={[styles.bulkActions, { backgroundColor: theme.colors.surface, borderBottomColor: theme.colors.border }]}>
+            <TouchableOpacity
+              onPress={handleBulkComplete}
+              style={[styles.bulkBtn, { backgroundColor: theme.colors.successLight }]}
+            >
+              <Text style={[styles.bulkBtnText, { color: theme.colors.success }]}>✓ Complete</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={handleBulkDelete}
+              style={[styles.bulkBtn, { backgroundColor: theme.colors.dangerLight }]}
+            >
+              <Text style={[styles.bulkBtnText, { color: theme.colors.danger }]}>🗑 Delete</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {!selectionMode && (
+          <>
+            <SearchBar theme={theme} query={searchQuery} onChange={setSearchQuery} />
+            <FilterBar
+              theme={theme}
+              filter={filter}
+              setFilter={setFilter}
+              stats={stats}
+              sortBy={sortBy}
+              setSortBy={setSortBy}
+            />
+          </>
+        )}
 
         <FlatList
           data={filteredTasks}
@@ -149,7 +246,14 @@ export default function App() {
               task={item}
               onToggle={handleToggle}
               onEdit={handleEdit}
+              onDelete={handleDelete}
               theme={theme}
+              selectionMode={selectionMode}
+              selected={selectedIds.has(item.id)}
+              onToggleSelection={toggleSelection}
+              onToggleSubtask={(subtaskId) => toggleSubtask(item.id, subtaskId)}
+              onAddSubtask={(text) => addSubtask(item.id, text)}
+              onDeleteSubtask={(subtaskId) => deleteSubtask(item.id, subtaskId)}
             />
           )}
           contentContainerStyle={[
@@ -161,24 +265,43 @@ export default function App() {
           showsVerticalScrollIndicator={false}
         />
 
-        <AddTask onAdd={addTask} theme={theme} />
+        {!selectionMode && <AddTask onAdd={addTask} theme={theme} />}
       </KeyboardAvoidingView>
 
-      <EditModal
-        task={editingTask}
-        onSave={editTask}
-        onDelete={handleDelete}
-        onClose={() => setEditingTask(null)}
-        theme={theme}
-      />
+      {!selectionMode && (
+        <EditModal
+          task={editingTask}
+          onSave={editTask}
+          onDelete={handleDelete}
+          onClose={() => setEditingTask(null)}
+          theme={theme}
+        />
+      )}
 
       {toast && (
         <View style={[styles.toast, { backgroundColor: theme.colors.surfaceElevated, borderColor: theme.colors.border }]}>
           <Text style={[styles.toastText, { color: theme.colors.text }]}>{toast.message}</Text>
-          <TouchableOpacity onPress={handleUndo}>
-            <Text style={[styles.toastAction, { color: theme.colors.primary }]}>Undo</Text>
-          </TouchableOpacity>
+          {toast.taskId && (
+            <TouchableOpacity onPress={handleUndo}>
+              <Text style={[styles.toastAction, { color: theme.colors.primary }]}>Undo</Text>
+            </TouchableOpacity>
+          )}
         </View>
+      )}
+
+      {!selectionMode && (
+        <TouchableOpacity
+          onLongPress={() => {
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+            toggleSelectionMode();
+          }}
+          style={[styles.selectModeHint, { backgroundColor: theme.colors.chip }]}
+          activeOpacity={0.7}
+        >
+          <Text style={[styles.selectModeHintText, { color: theme.colors.textSecondary }]}>
+            ⊡
+          </Text>
+        </TouchableOpacity>
       )}
     </SafeAreaView>
   );
@@ -229,5 +352,59 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '700',
     marginLeft: 16,
+  },
+  selectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  selectionBtn: {
+    padding: 8,
+  },
+  selectionBtnText: {
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  selectionCount: {
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  bulkActions: {
+    flexDirection: 'row',
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    gap: 10,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  bulkBtn: {
+    flex: 1,
+    paddingVertical: 10,
+    borderRadius: 10,
+    alignItems: 'center',
+  },
+  bulkBtnText: {
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  selectModeHint: {
+    position: 'absolute',
+    bottom: 20,
+    right: 20,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+    elevation: 3,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 4,
+  },
+  selectModeHintText: {
+    fontSize: 20,
   },
 });

@@ -19,16 +19,25 @@ const DUE_OPTIONS = [
   { id: 'nextWeek', label: 'Next week', icon: '📅', getValue: () => addDays(startOfToday(), 7) },
 ];
 
+const RECURRENCE_OPTIONS = [
+  { id: null, label: 'No repeat' },
+  { id: 'daily', label: '↻ Daily' },
+  { id: 'weekly', label: '↻ Weekly' },
+  { id: 'monthly', label: '↻ Monthly' },
+];
+
 export default function AddTask({ onAdd, theme }) {
   const [text, setText] = useState('');
   const [priorityIdx, setPriorityIdx] = useState(0);
   const [categoryIdx, setCategoryIdx] = useState(-1);
   const [dueIdx, setDueIdx] = useState(0);
+  const [recurrenceIdx, setRecurrenceIdx] = useState(0);
   const inputRef = useRef(null);
 
   const currentPriority = PRIORITIES[priorityIdx];
   const currentCategory = categoryIdx >= 0 ? CATEGORIES[categoryIdx] : null;
   const currentDue = DUE_OPTIONS[dueIdx];
+  const currentRecurrence = RECURRENCE_OPTIONS[recurrenceIdx];
 
   const cyclePriority = () => {
     Haptics.selectionAsync();
@@ -48,20 +57,26 @@ export default function AddTask({ onAdd, theme }) {
     setDueIdx((i) => (i + 1) % DUE_OPTIONS.length);
   };
 
+  const cycleRecurrence = () => {
+    Haptics.selectionAsync();
+    setRecurrenceIdx((i) => (i + 1) % RECURRENCE_OPTIONS.length);
+  };
+
   const handleAdd = () => {
     if (!text.trim()) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     const dueValue = currentDue.getValue ? currentDue.getValue() : null;
-    onAdd(text, currentPriority.id, currentCategory?.id || null, dueValue);
+    onAdd(text, currentPriority.id, currentCategory?.id || null, dueValue, '', [], currentRecurrence.id);
     setText('');
     setPriorityIdx(0);
     setCategoryIdx(-1);
     setDueIdx(0);
+    setRecurrenceIdx(0);
     Keyboard.dismiss();
   };
 
   const hasOptions =
-    currentPriority.id !== 'none' || currentCategory || currentDue.id !== 'none';
+    currentPriority.id !== 'none' || currentCategory || currentDue.id !== 'none' || currentRecurrence.id;
 
   return (
     <View style={[s.wrapper, { backgroundColor: theme.colors.surface, borderTopColor: theme.colors.border }]}>
@@ -194,6 +209,35 @@ export default function AddTask({ onAdd, theme }) {
             ]}
           >
             {currentDue.label}
+          </Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          onPress={cycleRecurrence}
+          style={[
+            s.optionChip,
+            {
+              backgroundColor: currentRecurrence.id
+                ? theme.colors.successLight
+                : theme.colors.chip,
+              borderColor: currentRecurrence.id
+                ? theme.colors.success + '40'
+                : theme.colors.border,
+            },
+          ]}
+        >
+          <Text style={s.optionIcon}>↻</Text>
+          <Text
+            style={[
+              s.optionText,
+              {
+                color: currentRecurrence.id
+                  ? theme.colors.success
+                  : theme.colors.textSecondary,
+              },
+            ]}
+          >
+            {currentRecurrence.label}
           </Text>
         </TouchableOpacity>
       </ScrollView>

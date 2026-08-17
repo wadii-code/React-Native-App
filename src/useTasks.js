@@ -1,4 +1,4 @@
-import { useReducer, useEffect, useCallback, useMemo } from 'react';
+import { useReducer, useEffect, useCallback, useMemo, useState } from 'react';
 import { loadTasks, saveTasks } from './storage';
 
 function generateId() {
@@ -17,6 +17,9 @@ function taskReducer(state, action) {
         priority: action.priority || 'none',
         category: action.category || null,
         dueDate: action.dueDate || null,
+        notes: action.notes || '',
+        subtasks: action.subtasks || [],
+        recurrence: action.recurrence || null,
         createdAt: Date.now(),
         completedAt: null,
       };
@@ -37,11 +40,47 @@ function taskReducer(state, action) {
     case 'TOGGLE':
       return {
         ...state,
-        tasks: state.tasks.map((t) =>
-          t.id === action.id
-            ? { ...t, done: !t.done, completedAt: !t.done ? Date.now() : null }
-            : t
-        ),
+        tasks: state.tasks.map((t) => {
+          if (t.id !== action.id) return t;
+          const newDone = !t.done;
+          return { ...t, done: newDone, completedAt: newDone ? Date.now() : null };
+        }),
+      };
+    case 'TOGGLE_SUBTASK':
+      return {
+        ...state,
+        tasks: state.tasks.map((t) => {
+          if (t.id !== action.taskId) return t;
+          const subtasks = t.subtasks.map((st) =>
+            st.id === action.subtaskId ? { ...st, done: !st.done } : st
+          );
+          return { ...t, subtasks };
+        }),
+      };
+    case 'ADD_SUBTASK':
+      return {
+        ...state,
+        tasks: state.tasks.map((t) => {
+          if (t.id !== action.taskId) return t;
+          return {
+            ...t,
+            subtasks: [
+              ...t.subtasks,
+              { id: generateId(), text: action.text.trim(), done: false },
+            ],
+          };
+        }),
+      };
+    case 'DELETE_SUBTASK':
+      return {
+        ...state,
+        tasks: state.tasks.map((t) => {
+          if (t.id !== action.taskId) return t;
+          return {
+            ...t,
+            subtasks: t.subtasks.filter((st) => st.id !== action.subtaskId),
+          };
+        }),
       };
     case 'RESTORE':
       return {
@@ -69,6 +108,8 @@ export function useTasks() {
     tasks: [],
     loaded: false,
   });
+  const [selectedIds, setSelectedIds] = useState(new Set());
+  const [selectionMode, setSelectionMode] = useState(false);
 
   useEffect(() => {
     loadTasks().then((tasks) => dispatch({ type: 'LOAD', tasks }));
@@ -79,8 +120,8 @@ export function useTasks() {
   }, [state.tasks, state.loaded]);
 
   const addTask = useCallback(
-    (text, priority, category, dueDate) =>
-      dispatch({ type: 'ADD', text, priority, category, dueDate }),
+    (text, priority, category, dueDate, notes, subtasks, recurrence) =>
+      dispatch({ type: 'ADD', text, priority, category, dueDate, notes, subtasks, recurrence }),
     []
   );
 
@@ -96,6 +137,21 @@ export function useTasks() {
 
   const toggleTask = useCallback(
     (id) => dispatch({ type: 'TOGGLE', id }),
+    []
+  );
+
+  const toggleSubtask = useCallback(
+    (taskId, subtaskId) => dispatch({ type: 'TOGGLE_SUBTASK', taskId, subtaskId }),
+    []
+  );
+
+  const addSubtask = useCallback(
+    (taskId, text) => dispatch({ type: 'ADD_SUBTASK', taskId, text }),
+    []
+  );
+
+  const deleteSubtask = useCallback(
+    (taskId, subtaskId) => dispatch({ type: 'DELETE_SUBTASK', taskId, subtaskId }),
     []
   );
 
@@ -118,6 +174,63 @@ export function useTasks() {
     };
   }, [state.tasks]);
 
+  const toggleSelectionMode = useCallback(() => {
+    setSelectionMode((prev) => {
+      if (prev) setSelectedIds(new Set());
+      return !prev;
+    });
+  }, []);
+
+  const toggleSelection = useCallback((id) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  }, []);
+
+  const selectAll = useCallback((taskIds) => {
+    setSelectedIds(new Set(taskIds));
+  }, []);
+
+  const deselectAll = useCallback(() => {
+    setSelectedIds(new Set());
+  }, []);
+
+  const bulkDelete = useCallback(() => {
+    selectedIds.forEach((id) => dispatch({ type: 'DELETE', id }));
+    setSelectedIds(new Set());
+    setSelectionMode(false);
+  }, [selectedIds]);
+
+  const bulkComplete = useCallback(() => {
+    selectedIds.forEach((id) => dispatch({ type: 'TOGGLE', id }));
+    setSelectedIds(new Set());
+    setSelectionMode(false);
+  }, [selectedIds]);
+
+  const bulkSetPriority = useCallback(
+    (priority) => {
+      selectedIds.forEach((id) => dispatch({ type: 'EDIT', id, updates: { priority } }));
+      setSelectedIds(new Set());
+      setSelectionMode(false);
+    },
+    [selectedIds]
+  );
+
+  const bulkSetCategory = useCallback(
+    (category) => {
+      selectedIds.forEach((id) => dispatch({ type: 'EDIT', id, updates: { category } }));
+      setSelectedIds(new Set());
+      setSelectionMode(false);
+    },
+    [selectedIds]
+  );
+
   return {
     tasks: state.tasks,
     loaded: state.loaded,
@@ -126,7 +239,20 @@ export function useTasks() {
     editTask,
     deleteTask,
     toggleTask,
+    toggleSubtask,
+    addSubtask,
+    deleteSubtask,
     restoreTask,
     reorderTasks,
+    selectionMode,
+    selectedIds,
+    toggleSelectionMode,
+    toggleSelection,
+    selectAll,
+    deselectAll,
+    bulkDelete,
+    bulkComplete,
+    bulkSetPriority,
+    bulkSetCategory,
   };
 }

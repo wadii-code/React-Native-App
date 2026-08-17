@@ -1,12 +1,23 @@
 import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import * as Haptics from 'expo-haptics';
 
-export default function Header({ theme, isDark, onToggleTheme, stats }) {
+export default function Header({ theme, isDark, onToggleTheme, stats, onToggleSelectionMode }) {
   const s = styles(theme);
   return (
     <View style={s.container}>
       <View style={s.row}>
-        <Text style={s.title}>Tasks</Text>
+        <TouchableOpacity
+          onLongPress={() => {
+            if (onToggleSelectionMode) {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+              onToggleSelectionMode();
+            }
+          }}
+          activeOpacity={0.7}
+        >
+          <Text style={s.title}>Tasks</Text>
+        </TouchableOpacity>
         <TouchableOpacity
           onPress={onToggleTheme}
           style={s.themeBtn}

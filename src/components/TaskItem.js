@@ -1,5 +1,6 @@
 import React, { useRef } from 'react';
 import { View, Text, TouchableOpacity, Animated, StyleSheet } from 'react-native';
+import { RectButton, Swipeable } from 'react-native-gesture-handler';
 import * as Haptics from 'expo-haptics';
 import { PRIORITIES, CATEGORIES } from '../theme';
 import { formatDueDate, isPast, isToday } from '../utils';
@@ -20,13 +21,40 @@ function Checkbox({ checked, color, onPress, borderColor }) {
   );
 }
 
-export default function TaskItem({ task, onToggle, onEdit, theme }) {
+function SwipeAction({ text, color, onPress }) {
+  return (
+    <RectButton
+      style={[styles.swipeAction, { backgroundColor: color }]}
+      onPress={onPress}
+    >
+      <Text style={styles.swipeActionText}>{text}</Text>
+    </RectButton>
+  );
+}
+
+export default function TaskItem({
+  task,
+  onToggle,
+  onEdit,
+  onDelete,
+  theme,
+  selectionMode,
+  selected,
+  onToggleSelection,
+  onToggleSubtask,
+  onAddSubtask,
+  onDeleteSubtask,
+}) {
   const scale = useRef(new Animated.Value(1)).current;
+  const swipeableRef = useRef(null);
   const priority = PRIORITIES.find((p) => p.id === task.priority) || PRIORITIES[0];
   const category = CATEGORIES.find((c) => c.id === task.category);
   const dueLabel = formatDueDate(task.dueDate);
   const overdue = task.dueDate && isPast(task.dueDate) && !task.done;
   const dueToday = task.dueDate && isToday(task.dueDate) && !task.done;
+
+  const completedSubtasks = task.subtasks ? task.subtasks.filter((st) => st.done).length : 0;
+  const totalSubtasks = task.subtasks ? task.subtasks.length : 0;
 
   const handleToggle = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -34,102 +62,184 @@ export default function TaskItem({ task, onToggle, onEdit, theme }) {
   };
 
   const handlePressIn = () => {
-    Animated.spring(scale, { toValue: 0.97, useNativeDriver: true }).start();
+    if (!selectionMode) {
+      Animated.spring(scale, { toValue: 0.97, useNativeDriver: true }).start();
+    }
   };
 
   const handlePressOut = () => {
-    Animated.spring(scale, { toValue: 1, friction: 3, useNativeDriver: true }).start();
+    if (!selectionMode) {
+      Animated.spring(scale, { toValue: 1, friction: 3, useNativeDriver: true }).start();
+    }
+  };
+
+  const handlePress = () => {
+    if (selectionMode) {
+      Haptics.selectionAsync();
+      onToggleSelection(task.id);
+    } else {
+      onEdit(task);
+    }
+  };
+
+  const handleSwipeDelete = () => {
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+    swipeableRef.current?.close();
+    onDelete(task.id);
+  };
+
+  const renderRightActions = (progress) => {
+    if (selectionMode) return null;
+    const translateX = progress.interpolate({
+      inputRange: [0, 1],
+      outputRange: [80, 0],
+    });
+    return (
+      <Animated.View style={{ transform: [{ translateX }] }}>
+        <SwipeAction text="Delete" color={theme.colors.danger} onPress={handleSwipeDelete} />
+      </Animated.View>
+    );
   };
 
   return (
-    <Animated.View style={{ transform: [{ scale }] }}>
-      <TouchableOpacity
-        activeOpacity={1}
-        onPressIn={handlePressIn}
-        onPressOut={handlePressOut}
-        onPress={() => onEdit(task)}
-        style={[styles.container, { backgroundColor: theme.colors.surface }]}
-      >
-        <View
+    <Swipeable
+      ref={swipeableRef}
+      renderRightActions={renderRightActions}
+      overshootRight={false}
+      friction={2}
+      rightThreshold={40}
+    >
+      <Animated.View style={{ transform: [{ scale }] }}>
+        <TouchableOpacity
+          activeOpacity={1}
+          onPressIn={handlePressIn}
+          onPressOut={handlePressOut}
+          onPress={handlePress}
           style={[
-            styles.priorityBar,
-            { backgroundColor: task.done ? theme.colors.border : priority.color },
+            styles.container,
+            {
+              backgroundColor: selected ? theme.colors.primaryLight : theme.colors.surface,
+            },
           ]}
-        />
-        <View style={styles.content}>
-          <View style={styles.topRow}>
-            <Checkbox
-              checked={task.done}
-              color={priority.color}
-              onPress={handleToggle}
-              borderColor={theme.colors.border}
-            />
-            <Text
-              numberOfLines={2}
-              style={[
-                styles.text,
-                { color: task.done ? theme.colors.textTertiary : theme.colors.text },
-                task.done && styles.textDone,
-              ]}
-            >
-              {task.text}
-            </Text>
-          </View>
-          {(category || dueLabel || task.priority !== 'none') && (
-            <View style={styles.metaRow}>
-              {category && (
-                <View style={[styles.badge, { backgroundColor: theme.colors.chip }]}>
-                  <Text style={styles.badgeIcon}>{category.icon}</Text>
-                  <Text style={[styles.badgeText, { color: theme.colors.textSecondary }]}>
-                    {category.label}
-                  </Text>
-                </View>
+        >
+          <View
+            style={[
+              styles.priorityBar,
+              { backgroundColor: task.done ? theme.colors.border : priority.color },
+            ]}
+          />
+          <View style={styles.content}>
+            <View style={styles.topRow}>
+              {selectionMode ? (
+                <Checkbox
+                  checked={selected}
+                  color={theme.colors.primary}
+                  onPress={() => {
+                    Haptics.selectionAsync();
+                    onToggleSelection(task.id);
+                  }}
+                  borderColor={theme.colors.border}
+                />
+              ) : (
+                <Checkbox
+                  checked={task.done}
+                  color={priority.color}
+                  onPress={handleToggle}
+                  borderColor={theme.colors.border}
+                />
               )}
-              {dueLabel && (
-                <View
+              <View style={styles.textContainer}>
+                <Text
+                  numberOfLines={2}
                   style={[
-                    styles.badge,
-                    {
-                      backgroundColor: overdue
-                        ? theme.colors.dangerLight
-                        : dueToday
-                        ? theme.colors.warningLight
-                        : theme.colors.chip,
-                    },
+                    styles.text,
+                    { color: task.done ? theme.colors.textTertiary : theme.colors.text },
+                    task.done && styles.textDone,
                   ]}
                 >
-                  <Text style={styles.badgeIcon}>📅</Text>
-                  <Text
+                  {task.text}
+                </Text>
+                {task.recurrence && (
+                  <Text style={[styles.recurrenceBadge, { color: theme.colors.primary }]}>
+                    {task.recurrence === 'daily' ? '↻ Daily' : task.recurrence === 'weekly' ? '↻ Weekly' : '↻ Monthly'}
+                  </Text>
+                )}
+              </View>
+            </View>
+
+            {(category || dueLabel || task.priority !== 'none' || totalSubtasks > 0) && (
+              <View style={styles.metaRow}>
+                {category && (
+                  <View style={[styles.badge, { backgroundColor: theme.colors.chip }]}>
+                    <Text style={styles.badgeIcon}>{category.icon}</Text>
+                    <Text style={[styles.badgeText, { color: theme.colors.textSecondary }]}>
+                      {category.label}
+                    </Text>
+                  </View>
+                )}
+                {dueLabel && (
+                  <View
                     style={[
-                      styles.badgeText,
+                      styles.badge,
                       {
-                        color: overdue
-                          ? theme.colors.danger
+                        backgroundColor: overdue
+                          ? theme.colors.dangerLight
                           : dueToday
-                          ? theme.colors.warning
-                          : theme.colors.textSecondary,
+                          ? theme.colors.warningLight
+                          : theme.colors.chip,
                       },
                     ]}
                   >
-                    {dueLabel}
-                  </Text>
-                </View>
-              )}
-              {task.priority !== 'none' && (
-                <View style={[styles.badge, { backgroundColor: theme.colors.chip }]}>
-                  <View
-                    style={[styles.priorityDot, { backgroundColor: priority.color }]}
-                  />
-                  <Text style={[styles.badgeText, { color: theme.colors.textSecondary }]}>
-                    {priority.label}
-                  </Text>
-                </View>
-              )}
-            </View>
-          )}
-        </View>
-      </TouchableOpacity>
-    </Animated.View>
+                    <Text style={styles.badgeIcon}>📅</Text>
+                    <Text
+                      style={[
+                        styles.badgeText,
+                        {
+                          color: overdue
+                            ? theme.colors.danger
+                            : dueToday
+                            ? theme.colors.warning
+                            : theme.colors.textSecondary,
+                        },
+                      ]}
+                    >
+                      {dueLabel}
+                    </Text>
+                  </View>
+                )}
+                {task.priority !== 'none' && (
+                  <View style={[styles.badge, { backgroundColor: theme.colors.chip }]}>
+                    <View
+                      style={[styles.priorityDot, { backgroundColor: priority.color }]}
+                    />
+                    <Text style={[styles.badgeText, { color: theme.colors.textSecondary }]}>
+                      {priority.label}
+                    </Text>
+                  </View>
+                )}
+                {totalSubtasks > 0 && (
+                  <View style={[styles.badge, { backgroundColor: theme.colors.chip }]}>
+                    <Text style={styles.badgeIcon}>☑</Text>
+                    <Text style={[styles.badgeText, { color: theme.colors.textSecondary }]}>
+                      {completedSubtasks}/{totalSubtasks}
+                    </Text>
+                  </View>
+                )}
+              </View>
+            )}
+
+            {task.notes && task.notes.trim() > '' && !selectionMode && (
+              <Text
+                numberOfLines={1}
+                style={[styles.notesPreview, { color: theme.colors.textTertiary }]}
+              >
+                📝 {task.notes}
+              </Text>
+            )}
+          </View>
+        </TouchableOpacity>
+      </Animated.View>
+    </Swipeable>
   );
 }
 
@@ -157,8 +267,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'flex-start',
   },
-  text: {
+  textContainer: {
     flex: 1,
+  },
+  text: {
     fontSize: 16,
     fontWeight: '400',
     lineHeight: 22,
@@ -208,5 +320,29 @@ const styles = StyleSheet.create({
     height: 8,
     borderRadius: 4,
     marginRight: 4,
+  },
+  swipeAction: {
+    justifyContent: 'center',
+    alignItems: 'center',
+    width: 80,
+    marginVertical: 8,
+    marginRight: 20,
+    borderRadius: 14,
+  },
+  swipeActionText: {
+    color: '#FFF',
+    fontWeight: '600',
+    fontSize: 14,
+  },
+  recurrenceBadge: {
+    fontSize: 11,
+    fontWeight: '600',
+    marginTop: 2,
+  },
+  notesPreview: {
+    fontSize: 13,
+    marginTop: 6,
+    marginLeft: 36,
+    fontStyle: 'italic',
   },
 });
