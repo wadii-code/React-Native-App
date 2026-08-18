@@ -10,49 +10,33 @@ import {
   KeyboardAvoidingView,
   Platform,
   StyleSheet,
-  FlatList,
-  Keyboard,
 } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import { PRIORITIES, CATEGORIES } from '../theme';
-import { startOfToday, addDays } from '../utils';
-
-const DUE_OPTIONS = [
-  { id: 'none', label: 'None', getValue: () => null },
-  { id: 'today', label: 'Today', getValue: () => startOfToday() },
-  { id: 'tomorrow', label: 'Tomorrow', getValue: () => addDays(startOfToday(), 1) },
-  { id: 'nextWeek', label: 'Next week', getValue: () => addDays(startOfToday(), 7) },
-];
-
-const RECURRENCE_OPTIONS = [
-  { id: null, label: 'None' },
-  { id: 'daily', label: 'Daily' },
-  { id: 'weekly', label: 'Weekly' },
-  { id: 'monthly', label: 'Monthly' },
-];
-
-function getDueId(dueDate) {
-  if (!dueDate) return 'none';
-  const today = startOfToday();
-  if (dueDate === today) return 'today';
-  if (dueDate === today + 86400000) return 'tomorrow';
-  if (dueDate === today + 7 * 86400000) return 'nextWeek';
-  return 'none';
-}
+import { DateChoice, TimeChoice } from './pickers';
+import { ConnectionsFields, SingleSelect } from './LinkPicker';
+import { RECURRENCE_PRESETS, normalizeRecurrence, recurrenceLabel } from '../domain/recurrence';
 
 function generateId() {
   return Date.now().toString(36) + Math.random().toString(36).substring(2, 9);
 }
 
-export default function EditModal({ task, onSave, onDelete, onClose, theme }) {
+const emptyLinks = { commitmentIds: [], goalIds: [], challengeIds: [], milestoneIds: [], habitId: null };
+
+export default function EditModal({ task, onSave, onDelete, onClose, theme, state }) {
   const [text, setText] = useState('');
   const [priorityId, setPriorityId] = useState('none');
   const [categoryId, setCategoryId] = useState(null);
-  const [dueId, setDueId] = useState('none');
+  const [dueDate, setDueDate] = useState(null);
+  const [dueTime, setDueTime] = useState(null);
   const [notes, setNotes] = useState('');
   const [subtasks, setSubtasks] = useState([]);
   const [newSubtaskText, setNewSubtaskText] = useState('');
-  const [recurrenceId, setRecurrenceId] = useState(null);
+  const [recurrenceType, setRecurrenceType] = useState(null);
+  const [projectId, setProjectId] = useState(null);
+  const [labels, setLabels] = useState([]);
+  const [labelDraft, setLabelDraft] = useState('');
+  const [links, setLinks] = useState(emptyLinks);
   const [expandedSection, setExpandedSection] = useState(null);
   const slideAnim = useRef(new Animated.Value(300)).current;
   const fadeAnim = useRef(new Animated.Value(0)).current;
@@ -71,10 +55,15 @@ export default function EditModal({ task, onSave, onDelete, onClose, theme }) {
       setText(task.text);
       setPriorityId(task.priority || 'none');
       setCategoryId(task.category || null);
-      setDueId(getDueId(task.dueDate));
+      setDueDate(task.dueDate || null);
+      setDueTime(task.dueTime == null ? null : task.dueTime);
       setNotes(task.notes || '');
       setSubtasks(task.subtasks ? [...task.subtasks] : []);
-      setRecurrenceId(task.recurrence || null);
+      setRecurrenceType(normalizeRecurrence(task.recurrence)?.type || null);
+      setProjectId(task.projectId || null);
+      setLabels(task.labels ? [...task.labels] : []);
+      setLinks({ ...emptyLinks, ...(task.links || {}) });
+      setLabelDraft('');
       setExpandedSection(null);
       Animated.parallel([
         Animated.spring(slideAnim, { toValue: 0, damping: 20, stiffness: 200, useNativeDriver: true }),
@@ -99,15 +88,18 @@ export default function EditModal({ task, onSave, onDelete, onClose, theme }) {
   const handleSave = () => {
     if (!task || !text.trim()) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    const dueOpt = DUE_OPTIONS.find((d) => d.id === dueId);
     onSave(task.id, {
       text: text.trim(),
       priority: priorityId,
       category: categoryId,
-      dueDate: dueOpt ? dueOpt.getValue() : null,
+      dueDate,
+      dueTime,
       notes,
       subtasks,
-      recurrence: recurrenceId,
+      recurrence: recurrenceType ? { type: recurrenceType } : null,
+      projectId,
+      labels,
+      links,
     });
     handleClose();
   };
@@ -122,18 +114,13 @@ export default function EditModal({ task, onSave, onDelete, onClose, theme }) {
   const handleAddSubtask = () => {
     if (!newSubtaskText.trim()) return;
     Haptics.selectionAsync();
-    setSubtasks((prev) => [
-      ...prev,
-      { id: generateId(), text: newSubtaskText.trim(), done: false },
-    ]);
+    setSubtasks((prev) => [...prev, { id: generateId(), text: newSubtaskText.trim(), done: false }]);
     setNewSubtaskText('');
   };
 
   const handleToggleSubtask = (subtaskId) => {
     Haptics.selectionAsync();
-    setSubtasks((prev) =>
-      prev.map((st) => (st.id === subtaskId ? { ...st, done: !st.done } : st))
-    );
+    setSubtasks((prev) => prev.map((st) => (st.id === subtaskId ? { ...st, done: !st.done } : st)));
   };
 
   const handleDeleteSubtask = (subtaskId) => {
@@ -149,23 +136,21 @@ export default function EditModal({ task, onSave, onDelete, onClose, theme }) {
   if (!task) return null;
 
   const completedSubtasks = subtasks.filter((st) => st.done).length;
+  const linkedCount =
+    links.commitmentIds.length + links.goalIds.length + links.challengeIds.length + (links.habitId ? 1 : 0);
+  const projects = state?.projects || [];
+  const habits = state?.habits || [];
 
   return (
     <Modal visible={!!task} transparent animationType="none" onRequestClose={handleClose}>
-      <KeyboardAvoidingView
-        style={s.overlay}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      >
+      <KeyboardAvoidingView style={s.overlay} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <Animated.View style={[s.backdrop, { opacity: fadeAnim }]}>
           <TouchableOpacity style={s.backdropTouch} onPress={handleClose} activeOpacity={1} />
         </Animated.View>
         <Animated.View
           style={[
             s.sheet,
-            {
-              backgroundColor: theme.colors.surface,
-              transform: [{ translateY: slideAnim }],
-            },
+            { backgroundColor: theme.colors.surface, transform: [{ translateY: slideAnim }] },
           ]}
         >
           <View style={s.handle} />
@@ -173,7 +158,14 @@ export default function EditModal({ task, onSave, onDelete, onClose, theme }) {
 
           <TextInput
             ref={inputRef}
-            style={[s.textInput, { color: theme.colors.text, backgroundColor: theme.colors.inputBg, borderColor: theme.colors.border }]}
+            style={[
+              s.textInput,
+              {
+                color: theme.colors.text,
+                backgroundColor: theme.colors.inputBg,
+                borderColor: theme.colors.border,
+              },
+            ]}
             value={text}
             onChangeText={setText}
             placeholder="Task name"
@@ -181,18 +173,20 @@ export default function EditModal({ task, onSave, onDelete, onClose, theme }) {
             returnKeyType="done"
           />
 
-          <ScrollView showsVerticalScrollIndicator={false}>
+          <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
             <Text style={[s.sectionLabel, { color: theme.colors.textSecondary }]}>Priority</Text>
             <View style={s.row}>
               {PRIORITIES.map((p) => (
                 <TouchableOpacity
                   key={p.id}
-                  onPress={() => { Haptics.selectionAsync(); setPriorityId(p.id); }}
+                  onPress={() => {
+                    Haptics.selectionAsync();
+                    setPriorityId(p.id);
+                  }}
                   style={[
                     s.selectBtn,
                     {
-                      backgroundColor:
-                        priorityId === p.id ? p.color + '20' : theme.colors.inputBg,
+                      backgroundColor: priorityId === p.id ? p.color + '20' : theme.colors.inputBg,
                       borderColor: priorityId === p.id ? p.color : theme.colors.border,
                     },
                   ]}
@@ -216,7 +210,10 @@ export default function EditModal({ task, onSave, onDelete, onClose, theme }) {
             <Text style={[s.sectionLabel, { color: theme.colors.textSecondary }]}>Category</Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} style={s.catScroll}>
               <TouchableOpacity
-                onPress={() => { Haptics.selectionAsync(); setCategoryId(null); }}
+                onPress={() => {
+                  Haptics.selectionAsync();
+                  setCategoryId(null);
+                }}
                 style={[
                   s.catBtn,
                   {
@@ -237,7 +234,10 @@ export default function EditModal({ task, onSave, onDelete, onClose, theme }) {
               {CATEGORIES.map((c) => (
                 <TouchableOpacity
                   key={c.id}
-                  onPress={() => { Haptics.selectionAsync(); setCategoryId(c.id); }}
+                  onPress={() => {
+                    Haptics.selectionAsync();
+                    setCategoryId(c.id);
+                  }}
                   style={[
                     s.catBtn,
                     {
@@ -262,59 +262,45 @@ export default function EditModal({ task, onSave, onDelete, onClose, theme }) {
               ))}
             </ScrollView>
 
-            <Text style={[s.sectionLabel, { color: theme.colors.textSecondary }]}>Due Date</Text>
-            <View style={s.row}>
-              {DUE_OPTIONS.map((d) => (
-                <TouchableOpacity
-                  key={d.id}
-                  onPress={() => { Haptics.selectionAsync(); setDueId(d.id); }}
-                  style={[
-                    s.selectBtn,
-                    {
-                      backgroundColor:
-                        dueId === d.id ? theme.colors.warningLight : theme.colors.inputBg,
-                      borderColor: dueId === d.id ? theme.colors.warning : theme.colors.border,
-                    },
-                  ]}
-                >
-                  <Text
-                    style={[
-                      s.selectText,
-                      {
-                        color: dueId === d.id ? theme.colors.warning : theme.colors.textSecondary,
-                        fontWeight: dueId === d.id ? '600' : '400',
-                      },
-                    ]}
-                  >
-                    {d.label}
-                  </Text>
-                </TouchableOpacity>
-              ))}
+            <Text style={[s.sectionLabel, { color: theme.colors.textSecondary }]}>Due date</Text>
+            <View style={{ marginBottom: 16 }}>
+              <DateChoice theme={theme} value={dueDate} onChange={setDueDate} />
             </View>
 
+            <Text style={[s.sectionLabel, { color: theme.colors.textSecondary }]}>Time</Text>
+            <View style={{ marginBottom: 16 }}>
+              <TimeChoice theme={theme} value={dueTime} onChange={setDueTime} />
+            </View>
+
+            {/* ------------------------------------------------ recurrence */}
             <TouchableOpacity
               onPress={() => toggleSection('recurrence')}
               style={[s.sectionToggle, { backgroundColor: theme.colors.inputBg }]}
             >
               <Text style={[s.sectionToggleText, { color: theme.colors.text }]}>
-                ↻ Recurrence {recurrenceId ? `(${RECURRENCE_OPTIONS.find((r) => r.id === recurrenceId)?.label})` : ''}
+                ↻ Repeat{recurrenceType ? ` (${recurrenceLabel({ type: recurrenceType })})` : ''}
               </Text>
               <Text style={[s.sectionToggleArrow, { color: theme.colors.textSecondary }]}>
                 {expandedSection === 'recurrence' ? '▾' : '▸'}
               </Text>
             </TouchableOpacity>
             {expandedSection === 'recurrence' && (
-              <View style={s.row}>
-                {RECURRENCE_OPTIONS.map((r) => (
+              <View style={[s.row, { flexWrap: 'wrap' }]}>
+                {RECURRENCE_PRESETS.map((r) => (
                   <TouchableOpacity
-                    key={r.id || 'none'}
-                    onPress={() => { Haptics.selectionAsync(); setRecurrenceId(r.id); }}
+                    key={r.type || 'none'}
+                    onPress={() => {
+                      Haptics.selectionAsync();
+                      setRecurrenceType(r.type);
+                    }}
                     style={[
                       s.selectBtn,
                       {
+                        flex: 0,
+                        paddingHorizontal: 14,
                         backgroundColor:
-                          recurrenceId === r.id ? theme.colors.primaryLight : theme.colors.inputBg,
-                        borderColor: recurrenceId === r.id ? theme.colors.primary : theme.colors.border,
+                          recurrenceType === r.type ? theme.colors.primaryLight : theme.colors.inputBg,
+                        borderColor: recurrenceType === r.type ? theme.colors.primary : theme.colors.border,
                       },
                     ]}
                   >
@@ -322,8 +308,9 @@ export default function EditModal({ task, onSave, onDelete, onClose, theme }) {
                       style={[
                         s.selectText,
                         {
-                          color: recurrenceId === r.id ? theme.colors.primary : theme.colors.textSecondary,
-                          fontWeight: recurrenceId === r.id ? '600' : '400',
+                          color:
+                            recurrenceType === r.type ? theme.colors.primary : theme.colors.textSecondary,
+                          fontWeight: recurrenceType === r.type ? '600' : '400',
                         },
                       ]}
                     >
@@ -334,6 +321,122 @@ export default function EditModal({ task, onSave, onDelete, onClose, theme }) {
               </View>
             )}
 
+            {/* ----------------------------------------------- connections */}
+            <TouchableOpacity
+              onPress={() => toggleSection('connections')}
+              style={[s.sectionToggle, { backgroundColor: theme.colors.inputBg }]}
+            >
+              <Text style={[s.sectionToggleText, { color: theme.colors.text }]}>
+                ⚭ Connections{linkedCount ? ` (${linkedCount})` : ''}
+              </Text>
+              <Text style={[s.sectionToggleArrow, { color: theme.colors.textSecondary }]}>
+                {expandedSection === 'connections' ? '▾' : '▸'}
+              </Text>
+            </TouchableOpacity>
+            {expandedSection === 'connections' && !!state && (
+              <View style={{ marginBottom: 8 }}>
+                <ConnectionsFields
+                  theme={theme}
+                  state={state}
+                  links={links}
+                  onChange={(patch) => setLinks((l) => ({ ...l, ...patch }))}
+                />
+                <Text style={[s.sectionLabel, { color: theme.colors.textSecondary }]}>
+                  Track as a habit check-in
+                </Text>
+                <View style={{ marginBottom: 16 }}>
+                  <SingleSelect
+                    theme={theme}
+                    options={habits
+                      .filter((h) => !h.archived)
+                      .map((h) => ({ id: h.id, label: h.name, icon: h.icon, color: h.color }))}
+                    value={links.habitId}
+                    onChange={(habitId) => setLinks((l) => ({ ...l, habitId }))}
+                    noneLabel="No"
+                  />
+                  <Text style={{ fontSize: 11, color: theme.colors.textTertiary, marginTop: 6 }}>
+                    Completing this task also checks off that habit for the day - and the other way
+                    round.
+                  </Text>
+                </View>
+              </View>
+            )}
+
+            {/* -------------------------------------------------- project */}
+            <TouchableOpacity
+              onPress={() => toggleSection('project')}
+              style={[s.sectionToggle, { backgroundColor: theme.colors.inputBg }]}
+            >
+              <Text style={[s.sectionToggleText, { color: theme.colors.text }]}>
+                📁 Project & labels
+                {labels.length ? ` (${labels.length} labels)` : ''}
+              </Text>
+              <Text style={[s.sectionToggleArrow, { color: theme.colors.textSecondary }]}>
+                {expandedSection === 'project' ? '▾' : '▸'}
+              </Text>
+            </TouchableOpacity>
+            {expandedSection === 'project' && (
+              <View style={{ marginBottom: 12 }}>
+                <SingleSelect
+                  theme={theme}
+                  options={projects
+                    .filter((p) => !p.archived)
+                    .map((p) => ({ id: p.id, label: p.name, icon: p.icon, color: p.color }))}
+                  value={projectId}
+                  onChange={setProjectId}
+                  noneLabel="Inbox"
+                />
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 12 }}>
+                  {labels.map((label) => (
+                    <TouchableOpacity
+                      key={label}
+                      onPress={() => setLabels((prev) => prev.filter((l) => l !== label))}
+                      style={{
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        paddingHorizontal: 10,
+                        paddingVertical: 6,
+                        borderRadius: 8,
+                        backgroundColor: theme.colors.chip,
+                      }}
+                    >
+                      <Text style={{ fontSize: 12, color: theme.colors.textSecondary }}>
+                        @{label}
+                      </Text>
+                      <Text style={{ fontSize: 12, marginLeft: 6, color: theme.colors.textTertiary }}>
+                        ✕
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+                <View style={s.addSubtaskRow}>
+                  <TextInput
+                    style={[
+                      s.subtaskInput,
+                      {
+                        color: theme.colors.text,
+                        backgroundColor: theme.colors.inputBg,
+                        borderColor: theme.colors.border,
+                      },
+                    ]}
+                    value={labelDraft}
+                    onChangeText={setLabelDraft}
+                    placeholder="Add label…"
+                    placeholderTextColor={theme.colors.textTertiary}
+                    autoCapitalize="none"
+                    returnKeyType="done"
+                    onSubmitEditing={() => {
+                      const value = labelDraft.trim().replace(/^@/, '');
+                      if (!value || labels.includes(value)) return;
+                      setLabels((prev) => [...prev, value]);
+                      setLabelDraft('');
+                    }}
+                  />
+                </View>
+              </View>
+            )}
+
+            {/* ---------------------------------------------------- notes */}
             <TouchableOpacity
               onPress={() => toggleSection('notes')}
               style={[s.sectionToggle, { backgroundColor: theme.colors.inputBg }]}
@@ -347,7 +450,14 @@ export default function EditModal({ task, onSave, onDelete, onClose, theme }) {
             </TouchableOpacity>
             {expandedSection === 'notes' && (
               <TextInput
-                style={[s.notesInput, { color: theme.colors.text, backgroundColor: theme.colors.inputBg, borderColor: theme.colors.border }]}
+                style={[
+                  s.notesInput,
+                  {
+                    color: theme.colors.text,
+                    backgroundColor: theme.colors.inputBg,
+                    borderColor: theme.colors.border,
+                  },
+                ]}
                 value={notes}
                 onChangeText={setNotes}
                 placeholder="Add notes..."
@@ -358,6 +468,7 @@ export default function EditModal({ task, onSave, onDelete, onClose, theme }) {
               />
             )}
 
+            {/* ------------------------------------------------- subtasks */}
             <TouchableOpacity
               onPress={() => toggleSection('subtasks')}
               style={[s.sectionToggle, { backgroundColor: theme.colors.inputBg }]}
@@ -383,7 +494,7 @@ export default function EditModal({ task, onSave, onDelete, onClose, theme }) {
                         },
                       ]}
                     >
-                       {st.done && <Text style={s.checkmarkSmall}>✓</Text>}
+                      {st.done && <Text style={s.checkmarkSmall}>✓</Text>}
                     </TouchableOpacity>
                     <Text
                       style={[
@@ -404,7 +515,14 @@ export default function EditModal({ task, onSave, onDelete, onClose, theme }) {
                 <View style={s.addSubtaskRow}>
                   <TextInput
                     ref={subtaskInputRef}
-                    style={[s.subtaskInput, { color: theme.colors.text, backgroundColor: theme.colors.inputBg, borderColor: theme.colors.border }]}
+                    style={[
+                      s.subtaskInput,
+                      {
+                        color: theme.colors.text,
+                        backgroundColor: theme.colors.inputBg,
+                        borderColor: theme.colors.border,
+                      },
+                    ]}
                     value={newSubtaskText}
                     onChangeText={setNewSubtaskText}
                     placeholder="Add subtask..."
@@ -414,10 +532,20 @@ export default function EditModal({ task, onSave, onDelete, onClose, theme }) {
                   />
                   <TouchableOpacity
                     onPress={handleAddSubtask}
-                    style={[s.addSubtaskBtn, { backgroundColor: newSubtaskText.trim() ? theme.colors.primary : theme.colors.chip }]}
+                    style={[
+                      s.addSubtaskBtn,
+                      { backgroundColor: newSubtaskText.trim() ? theme.colors.primary : theme.colors.chip },
+                    ]}
                     disabled={!newSubtaskText.trim()}
                   >
-                    <Text style={[s.addSubtaskBtnText, { color: newSubtaskText.trim() ? '#FFF' : theme.colors.textTertiary }]}>+</Text>
+                    <Text
+                      style={[
+                        s.addSubtaskBtnText,
+                        { color: newSubtaskText.trim() ? '#FFF' : theme.colors.textTertiary },
+                      ]}
+                    >
+                      +
+                    </Text>
                   </TouchableOpacity>
                 </View>
               </View>
@@ -440,7 +568,10 @@ export default function EditModal({ task, onSave, onDelete, onClose, theme }) {
               </TouchableOpacity>
               <TouchableOpacity
                 onPress={handleSave}
-                style={[s.saveBtn, { backgroundColor: text.trim() ? theme.colors.primary : theme.colors.chip }]}
+                style={[
+                  s.saveBtn,
+                  { backgroundColor: text.trim() ? theme.colors.primary : theme.colors.chip },
+                ]}
                 disabled={!text.trim()}
               >
                 <Text

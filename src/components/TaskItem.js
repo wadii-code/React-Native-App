@@ -3,7 +3,9 @@ import { View, Text, TouchableOpacity, Animated, StyleSheet } from 'react-native
 import { RectButton, Swipeable } from 'react-native-gesture-handler';
 import * as Haptics from 'expo-haptics';
 import { PRIORITIES, CATEGORIES } from '../theme';
-import { formatDueDate, isPast, isToday } from '../utils';
+import { formatDueDate, isPast, isToday, formatTime } from '../utils';
+import { recurrenceLabel } from '../domain/recurrence';
+import { ConnectionSummary } from './LinkPicker';
 
 function Checkbox({ checked, color, onPress, borderColor }) {
   return (
@@ -44,6 +46,7 @@ export default function TaskItem({
   onToggleSubtask,
   onAddSubtask,
   onDeleteSubtask,
+  state,
 }) {
   const scale = useRef(new Animated.Value(1)).current;
   const swipeableRef = useRef(null);
@@ -159,15 +162,21 @@ export default function TaskItem({
                 >
                   {task.text}
                 </Text>
-                {task.recurrence && (
+                {!!task.recurrence && (
                   <Text style={[styles.recurrenceBadge, { color: theme.colors.primary }]}>
-                    {task.recurrence === 'daily' ? '↻ Daily' : task.recurrence === 'weekly' ? '↻ Weekly' : '↻ Monthly'}
+                    {'↻ '}
+                    {recurrenceLabel(task.recurrence)}
                   </Text>
                 )}
               </View>
             </View>
 
-            {(category || dueLabel || task.priority !== 'none' || totalSubtasks > 0) && (
+            {(category ||
+              dueLabel ||
+              task.priority !== 'none' ||
+              totalSubtasks > 0 ||
+              task.dueTime != null ||
+              (task.labels || []).length > 0) && (
               <View style={styles.metaRow}>
                 {category && (
                   <View style={[styles.badge, { backgroundColor: theme.colors.chip }]}>
@@ -207,6 +216,29 @@ export default function TaskItem({
                     </Text>
                   </View>
                 )}
+                {task.dueTime != null && (
+                  <View style={[styles.badge, { backgroundColor: theme.colors.chip }]}>
+                    <Text style={styles.badgeIcon}>🕐</Text>
+                    <Text style={[styles.badgeText, { color: theme.colors.textSecondary }]}>
+                      {formatTime(task.dueTime)}
+                    </Text>
+                  </View>
+                )}
+                {!!task.links && !!task.links.habitId && (
+                  <View style={[styles.badge, { backgroundColor: theme.colors.chip }]}>
+                    <Text style={styles.badgeIcon}>🔁</Text>
+                    <Text style={[styles.badgeText, { color: theme.colors.textSecondary }]}>
+                      Habit
+                    </Text>
+                  </View>
+                )}
+                {(task.labels || []).slice(0, 2).map((label) => (
+                  <View key={label} style={[styles.badge, { backgroundColor: theme.colors.chip }]}>
+                    <Text style={[styles.badgeText, { color: theme.colors.textSecondary }]}>
+                      @{label}
+                    </Text>
+                  </View>
+                ))}
                 {task.priority !== 'none' && (
                   <View style={[styles.badge, { backgroundColor: theme.colors.chip }]}>
                     <View
@@ -228,7 +260,16 @@ export default function TaskItem({
               </View>
             )}
 
-            {task.notes && task.notes.trim() > '' && !selectionMode && (
+            {!!state && !selectionMode && (
+              <ConnectionSummary
+                theme={theme}
+                state={state}
+                links={task.links || {}}
+                style={styles.connections}
+              />
+            )}
+
+            {!!task.notes && task.notes.trim().length > 0 && !selectionMode && (
               <Text
                 numberOfLines={1}
                 style={[styles.notesPreview, { color: theme.colors.textTertiary }]}
@@ -344,5 +385,9 @@ const styles = StyleSheet.create({
     marginTop: 6,
     marginLeft: 36,
     fontStyle: 'italic',
+  },
+  connections: {
+    marginTop: 8,
+    marginLeft: 36,
   },
 });
