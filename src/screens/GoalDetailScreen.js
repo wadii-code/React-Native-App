@@ -1,12 +1,35 @@
+/**
+ * A goal, in detail.
+ *
+ * A goal is the middle layer: it has a number, a deadline and a parent. The
+ * counter, when it has one, is given a control large enough to use one-handed,
+ * because that is the one thing people come back to this screen to do.
+ */
 import React, { useMemo, useState } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, StyleSheet } from 'react-native';
-import * as Haptics from 'expo-haptics';
+import { View, Text, Animated } from 'react-native';
 import { useApp } from '../store/AppStore';
 import { useNav } from '../navigation';
-import { Card, ScreenHeader, SectionTitle, ProgressRing, ProgressBar, Checkbox } from '../components/ui';
-import { MilestoneRow, HabitCheckButton, ChallengeCard } from '../components/cards';
+import { withAlpha } from '../theme';
+import {
+  Card,
+  NavBar,
+  ProgressRing,
+  ProgressBar,
+  Checkbox,
+  ListGroup,
+  ListRow,
+  Button,
+  Icon,
+  IconWell,
+  PressableScale,
+  FadeIn,
+  useScrollY,
+  useHeaderSpacer,
+  useSafeArea,
+} from '../components/ui';
+import { Section, HabitCheck } from '../components/rows';
+import { MilestoneRow, ChallengeCard } from '../components/cards';
 import { GoalEditor, MilestoneEditor } from '../components/editors';
-import { NumberStepper } from '../components/pickers';
 import { goalProgress, habitStats, challengeStats, milestonesOf } from '../domain/engine';
 import { todayKey, formatShortDate } from '../utils';
 
@@ -16,6 +39,9 @@ export default function GoalDetailScreen({ theme, params }) {
   const today = todayKey();
   const [editing, setEditing] = useState(false);
   const [milestoneEditor, setMilestoneEditor] = useState(null);
+  const { scrollY, onScroll, scrollEventThrottle } = useScrollY();
+  const headerSpace = useHeaderSpacer();
+  const insets = useSafeArea();
 
   const goal = state.goals.find((g) => g.id === params.id);
   const progress = useMemo(
@@ -25,9 +51,11 @@ export default function GoalDetailScreen({ theme, params }) {
 
   if (!goal || !progress) {
     return (
-      <View style={{ flex: 1 }}>
-        <ScreenHeader theme={theme} title="Goal" onBack={nav.goBack} />
-        <Text style={{ padding: 20, color: theme.colors.textSecondary }}>This goal no longer exists.</Text>
+      <View style={{ flex: 1, backgroundColor: theme.colors.background }}>
+        <NavBar theme={theme} title="Goal" onBack={nav.goBack} alwaysSolid compactOnly />
+        <Text style={{ padding: 20, marginTop: headerSpace, ...theme.type.callout, color: theme.colors.textSecondary }}>
+          This goal no longer exists.
+        </Text>
       </View>
     );
   }
@@ -36,125 +64,144 @@ export default function GoalDetailScreen({ theme, params }) {
   const milestones = milestonesOf(index, 'goal', goal.id);
 
   return (
-    <View style={{ flex: 1 }}>
-      <ScreenHeader
+    <View style={{ flex: 1, backgroundColor: theme.colors.background }}>
+      <NavBar
         theme={theme}
-        title={`${goal.icon}  ${goal.title}`}
-        subtitle={[
-          commitment ? `${commitment.icon} ${commitment.title}` : 'Standalone goal',
-          goal.targetDate ? `by ${formatShortDate(goal.targetDate)}` : null,
-        ]
-          .filter(Boolean)
-          .join(' · ')}
+        title={goal.title}
+        scrollY={scrollY}
+        threshold={70}
         onBack={nav.goBack}
-        compact
-        right={
-          <TouchableOpacity
-            onPress={() => setEditing(true)}
-            style={{
-              paddingHorizontal: 14,
-              paddingVertical: 8,
-              borderRadius: theme.borderRadius.md,
-              backgroundColor: theme.colors.chip,
-            }}
-          >
-            <Text style={{ fontWeight: '600', fontSize: theme.fontSize.sm, color: theme.colors.text }}>
-              Edit
-            </Text>
-          </TouchableOpacity>
-        }
+        right={<Button theme={theme} label="Edit" variant="plain" size="sm" onPress={() => setEditing(true)} />}
       />
 
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 120 }}>
-        <View style={{ paddingHorizontal: 20, marginTop: 8 }}>
-          <Card theme={theme}>
-            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-              <ProgressRing theme={theme} percent={progress.percent} color={goal.color} size={84} stroke={8}>
-                <Text style={{ fontSize: 19, fontWeight: '700', color: theme.colors.text }}>
-                  {progress.percent}%
-                </Text>
-              </ProgressRing>
-              <View style={{ flex: 1, marginLeft: 18 }}>
-                {progress.parts.length ? (
-                  progress.parts.map((part, i) => (
-                    <View key={part.label} style={{ marginBottom: i === progress.parts.length - 1 ? 0 : 9 }}>
-                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 3 }}>
-                        <Text style={{ fontSize: theme.fontSize.xs, fontWeight: '600', color: theme.colors.textSecondary }}>
-                          {part.label}
-                        </Text>
-                        <Text style={{ fontSize: theme.fontSize.xs, color: theme.colors.textTertiary }}>
-                          {part.detail}
-                        </Text>
-                      </View>
-                      <ProgressBar theme={theme} percent={part.percent} color={goal.color} height={4} />
-                    </View>
-                  ))
-                ) : (
-                  <Text style={{ fontSize: theme.fontSize.sm, color: theme.colors.textTertiary }}>
-                    Add milestones, or link tasks and habits, and progress fills itself in.
+      <Animated.ScrollView
+        showsVerticalScrollIndicator={false}
+        onScroll={onScroll}
+        scrollEventThrottle={scrollEventThrottle}
+        contentContainerStyle={{ paddingTop: headerSpace, paddingBottom: insets.bottom + 48 }}
+      >
+        <FadeIn>
+          <View style={{ paddingHorizontal: theme.screen, marginTop: 6 }}>
+            <Card
+              theme={theme}
+              elevation="sm"
+              tint={withAlpha(goal.color, theme.dark ? 0.11 : 0.06)}
+              style={{ padding: 18 }}
+            >
+              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                <IconWell theme={theme} color={withAlpha(goal.color, theme.dark ? 0.26 : 0.16)} size={44}>
+                  <Text style={{ fontSize: 21 }}>{goal.icon}</Text>
+                </IconWell>
+                <View style={{ flex: 1, marginLeft: 13 }}>
+                  <Text numberOfLines={2} style={{ ...theme.type.title3, color: theme.colors.text }}>
+                    {goal.title}
                   </Text>
-                )}
+                  <Text style={{ ...theme.type.caption, color: theme.colors.textTertiary, marginTop: 3 }}>
+                    {[
+                      commitment ? `${commitment.icon} ${commitment.title}` : 'Standalone goal',
+                      goal.targetDate ? `by ${formatShortDate(goal.targetDate)}` : null,
+                    ]
+                      .filter(Boolean)
+                      .join(' · ')}
+                  </Text>
+                </View>
               </View>
-            </View>
-          </Card>
-        </View>
+
+              <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 20 }}>
+                <ProgressRing
+                  theme={theme}
+                  percent={progress.percent}
+                  color={goal.color}
+                  size={82}
+                  stroke={8}
+                  trackColor={withAlpha(goal.color, theme.dark ? 0.18 : 0.13)}
+                >
+                  <Text style={{ ...theme.type.title3, color: theme.colors.text }}>{progress.percent}%</Text>
+                </ProgressRing>
+                <View style={{ flex: 1, marginLeft: 18 }}>
+                  {progress.parts.length ? (
+                    progress.parts.map((part, i) => (
+                      <View key={part.label} style={{ marginBottom: i === progress.parts.length - 1 ? 0 : 11 }}>
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 5 }}>
+                          <Text style={{ ...theme.type.caption, color: theme.colors.textSecondary, fontWeight: '600' }}>
+                            {part.label}
+                          </Text>
+                          <Text style={{ ...theme.type.caption, color: theme.colors.textTertiary }}>
+                            {part.detail}
+                          </Text>
+                        </View>
+                        <ProgressBar theme={theme} percent={part.percent} color={goal.color} height={4} />
+                      </View>
+                    ))
+                  ) : (
+                    <Text style={{ ...theme.type.subhead, color: theme.colors.textTertiary, lineHeight: 20 }}>
+                      Add milestones, or link tasks and habits, and progress fills itself in.
+                    </Text>
+                  )}
+                </View>
+              </View>
+            </Card>
+          </View>
+        </FadeIn>
 
         {goal.metric.type === 'count' && (
-          <View style={{ paddingHorizontal: 20, marginTop: 20 }}>
-            <SectionTitle theme={theme} title="Counter" />
+          <Section theme={theme} title="Counter">
             <Card theme={theme}>
               <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
                 <View>
-                  <Text style={{ fontSize: 26, fontWeight: '700', color: theme.colors.text }}>
+                  <Text style={{ ...theme.type.largeTitle, color: theme.colors.text }}>
                     {goal.metric.current}
-                    <Text style={{ fontSize: theme.fontSize.md, color: theme.colors.textTertiary }}>
+                    <Text style={{ ...theme.type.title3, color: theme.colors.textTertiary }}>
                       {' '}
                       / {goal.metric.target} {goal.metric.unit}
                     </Text>
                   </Text>
                 </View>
                 <View style={{ flexDirection: 'row', gap: 10 }}>
-                  <TouchableOpacity
-                    onPress={() => {
-                      Haptics.selectionAsync();
-                      actions.bumpGoalMetric(goal.id, -1);
-                    }}
+                  <PressableScale
+                    onPress={() => actions.bumpGoalMetric(goal.id, -1)}
+                    scaleTo={0.9}
                     style={{
-                      width: 44,
-                      height: 44,
-                      borderRadius: 12,
+                      width: 46,
+                      height: 46,
+                      borderRadius: theme.radius.md,
                       alignItems: 'center',
                       justifyContent: 'center',
-                      backgroundColor: theme.colors.inputBg,
+                      backgroundColor: theme.colors.fill2,
                     }}
                   >
-                    <Text style={{ fontSize: 20, color: theme.colors.textSecondary }}>−</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    onPress={() => {
-                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                      actions.bumpGoalMetric(goal.id, 1);
-                    }}
+                    <Icon name="minus" size={18} color={theme.colors.textSecondary} weight={2.4} />
+                  </PressableScale>
+                  <PressableScale
+                    onPress={() => actions.bumpGoalMetric(goal.id, 1)}
+                    feedback="light"
+                    scaleTo={0.9}
                     style={{
-                      width: 44,
-                      height: 44,
-                      borderRadius: 12,
+                      width: 46,
+                      height: 46,
+                      borderRadius: theme.radius.md,
                       alignItems: 'center',
                       justifyContent: 'center',
                       backgroundColor: goal.color,
                     }}
                   >
-                    <Text style={{ fontSize: 20, color: '#FFF' }}>+</Text>
-                  </TouchableOpacity>
+                    <Icon name="plus" size={18} color="#FFFFFF" weight={2.4} />
+                  </PressableScale>
                 </View>
               </View>
+              <ProgressBar
+                theme={theme}
+                percent={goal.metric.target ? (goal.metric.current / goal.metric.target) * 100 : 0}
+                color={goal.color}
+                height={6}
+                style={{ marginTop: 16 }}
+              />
             </Card>
-          </View>
+          </Section>
         )}
 
-        <View style={{ paddingHorizontal: 20, marginTop: 24 }}>
-          <SectionTitle theme={theme} title="Milestones" action="+ Add" onAction={() => setMilestoneEditor('new')} />
-          <Card theme={theme}>
+        <Section theme={theme} title="Milestones" action="Add" onAction={() => setMilestoneEditor('new')}>
+          <Card theme={theme} style={{ paddingVertical: milestones.length ? 4 : 16 }}>
             {milestones.length ? (
               milestones.map((m) => (
                 <MilestoneRow
@@ -167,128 +214,109 @@ export default function GoalDetailScreen({ theme, params }) {
                 />
               ))
             ) : (
-              <Text style={{ fontSize: theme.fontSize.sm, color: theme.colors.textTertiary }}>
+              <Text style={{ ...theme.type.subhead, color: theme.colors.textTertiary }}>
                 No milestones yet.
               </Text>
             )}
           </Card>
-        </View>
+        </Section>
 
-        <View style={{ paddingHorizontal: 20, marginTop: 24 }}>
-          <SectionTitle theme={theme} title="Tasks" />
-          <Card theme={theme}>
-            {progress.tasks.length ? (
-              progress.tasks.map((task, i) => (
-                <View
-                  key={task.id}
-                  style={{
-                    flexDirection: 'row',
-                    alignItems: 'center',
-                    paddingVertical: 9,
-                    borderBottomWidth: i === progress.tasks.length - 1 ? 0 : StyleSheet.hairlineWidth,
-                    borderBottomColor: theme.colors.borderLight,
-                  }}
-                >
-                  <Checkbox
-                    theme={theme}
-                    checked={task.done}
-                    size={20}
-                    color={goal.color}
-                    onPress={() => {
-                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                      actions.toggleTask(task.id);
-                    }}
-                  />
-                  <Text
-                    style={{
-                      flex: 1,
-                      marginLeft: 12,
-                      fontSize: theme.fontSize.md,
-                      color: task.done ? theme.colors.textTertiary : theme.colors.text,
-                      textDecorationLine: task.done ? 'line-through' : 'none',
-                    }}
-                  >
-                    {task.text}
-                  </Text>
-                </View>
-              ))
-            ) : (
-              <Text style={{ fontSize: theme.fontSize.sm, color: theme.colors.textTertiary }}>
+        <Section theme={theme} title="Tasks">
+          {progress.tasks.length ? (
+            <ListGroup theme={theme} inset={48}>
+              {progress.tasks.map((task) => (
+                <ListRow key={task.id} theme={theme} paddingVertical={11}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                    <Checkbox
+                      theme={theme}
+                      checked={task.done}
+                      size={21}
+                      color={goal.color}
+                      onPress={() => actions.toggleTask(task.id)}
+                    />
+                    <Text
+                      style={{
+                        flex: 1,
+                        marginLeft: 13,
+                        ...theme.type.callout,
+                        color: task.done ? theme.colors.textTertiary : theme.colors.text,
+                        textDecorationLine: task.done ? 'line-through' : 'none',
+                      }}
+                    >
+                      {task.text}
+                    </Text>
+                  </View>
+                </ListRow>
+              ))}
+            </ListGroup>
+          ) : (
+            <Card theme={theme}>
+              <Text style={{ ...theme.type.subhead, color: theme.colors.textTertiary }}>
                 Link tasks to this goal from the task editor.
               </Text>
-            )}
-          </Card>
-        </View>
+            </Card>
+          )}
+        </Section>
 
         {!!progress.habits.length && (
-          <View style={{ paddingHorizontal: 20, marginTop: 24 }}>
-            <SectionTitle theme={theme} title="Habits" />
-            <Card theme={theme}>
-              {progress.habits.map((habit, i) => {
+          <Section theme={theme} title="Habits">
+            <ListGroup theme={theme} inset={16}>
+              {progress.habits.map((habit) => {
                 const stats = habitStats(habit, index, today);
                 return (
-                  <View
+                  <ListRow
                     key={habit.id}
-                    style={{
-                      flexDirection: 'row',
-                      alignItems: 'center',
-                      paddingVertical: 9,
-                      borderBottomWidth: i === progress.habits.length - 1 ? 0 : StyleSheet.hairlineWidth,
-                      borderBottomColor: theme.colors.borderLight,
-                    }}
+                    theme={theme}
+                    onPress={() => nav.navigate('habitDetail', { id: habit.id })}
+                    paddingVertical={10}
                   >
-                    <TouchableOpacity
-                      style={{ flex: 1, flexDirection: 'row', alignItems: 'center' }}
-                      activeOpacity={0.7}
-                      onPress={() => nav.navigate('habitDetail', { id: habit.id })}
-                    >
-                      <Text style={{ fontSize: 16, marginRight: 10 }}>{habit.icon}</Text>
-                      <Text style={{ flex: 1, fontSize: theme.fontSize.md, color: theme.colors.text }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                      <Text style={{ fontSize: 17, marginRight: 11 }}>{habit.icon}</Text>
+                      <Text style={{ flex: 1, ...theme.type.callout, color: theme.colors.text }}>
                         {habit.name}
                       </Text>
-                    </TouchableOpacity>
-                    <HabitCheckButton
-                      theme={theme}
-                      habit={habit}
-                      stats={stats}
-                      size={34}
-                      onCheck={() => actions.checkHabit(habit.id, habit.target || 1)}
-                      onUncheck={() => actions.uncheckHabit(habit.id)}
-                      onSetAmount={(amount) => actions.setHabitAmount(habit.id, amount)}
-                    />
-                  </View>
+                      <HabitCheck
+                        theme={theme}
+                        habit={habit}
+                        stats={stats}
+                        size={34}
+                        onCheck={() => actions.checkHabit(habit.id, habit.target || 1)}
+                        onUncheck={() => actions.uncheckHabit(habit.id)}
+                        onSetAmount={(amount) => actions.setHabitAmount(habit.id, amount)}
+                      />
+                    </View>
+                  </ListRow>
                 );
               })}
-            </Card>
-          </View>
+            </ListGroup>
+          </Section>
         )}
 
         {!!progress.challenges.length && (
-          <View style={{ paddingHorizontal: 20, marginTop: 24 }}>
-            <SectionTitle theme={theme} title="Challenges" />
+          <Section theme={theme} title="Challenges">
             {progress.challenges.map((c) => (
               <ChallengeCard
                 key={c.id}
                 theme={theme}
                 challenge={c}
                 stats={challengeStats(c, state, index, today)}
+                today={today}
                 onPress={() => nav.navigate('challengeDetail', { id: c.id })}
               />
             ))}
-          </View>
+          </Section>
         )}
 
         {!!goal.description && (
-          <View style={{ paddingHorizontal: 20, marginTop: 24 }}>
-            <SectionTitle theme={theme} title="Notes" />
+          <Section theme={theme} title="Notes">
             <Card theme={theme}>
-              <Text style={{ fontSize: theme.fontSize.md, color: theme.colors.textSecondary, lineHeight: 22 }}>
+              <Text style={{ ...theme.type.callout, color: theme.colors.textSecondary, lineHeight: 22 }}>
                 {goal.description}
               </Text>
             </Card>
-          </View>
+          </Section>
         )}
-      </ScrollView>
+      </Animated.ScrollView>
 
       <GoalEditor
         theme={theme}

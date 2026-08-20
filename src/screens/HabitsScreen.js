@@ -1,11 +1,30 @@
+/**
+ * Habits.
+ *
+ * Each card carries its own eleven-week grid, so the list answers "which of
+ * these am I actually keeping?" without opening a single one. That comparison
+ * is the whole point of a habit screen; numbers alone never deliver it.
+ */
 import React, { useMemo, useState } from 'react';
-import { View, Text, ScrollView, TouchableOpacity } from 'react-native';
+import { View, Text, Animated } from 'react-native';
 import { useApp } from '../store/AppStore';
 import { useNav } from '../navigation';
-import { ScreenHeader, Segmented, StatTile, EmptyBlock, Card } from '../components/ui';
+import {
+  NavBar,
+  LargeTitle,
+  Segmented,
+  StatTile,
+  EmptyBlock,
+  Card,
+  RoundButton,
+  FadeIn,
+  useScrollY,
+  useHeaderSpacer,
+} from '../components/ui';
+import { useTabBarHeight } from '../components/TabBar';
 import { HabitCard } from '../components/cards';
 import { HabitEditor } from '../components/editors';
-import { habitStats, habitWeekCells } from '../domain/engine';
+import { habitStats, habitWeekCells, habitHistory } from '../domain/engine';
 import { todayKey } from '../utils';
 
 export default function HabitsScreen({ theme }) {
@@ -14,6 +33,9 @@ export default function HabitsScreen({ theme }) {
   const today = todayKey();
   const [view, setView] = useState('today');
   const [editing, setEditing] = useState(null); // null | {habit} | 'new'
+  const { scrollY, onScroll, scrollEventThrottle } = useScrollY();
+  const headerSpace = useHeaderSpacer();
+  const tabBar = useTabBarHeight();
 
   const rows = useMemo(
     () =>
@@ -23,15 +45,14 @@ export default function HabitsScreen({ theme }) {
           habit,
           stats: habitStats(habit, index, today),
           week: habitWeekCells(habit, index, today),
+          history: habitHistory(habit, index, 76, today),
         })),
     [state.habits, index, today]
   );
 
   const visible = useMemo(() => {
     const list =
-      view === 'today'
-        ? rows.filter((r) => r.stats.dueToday || r.stats.amountToday > 0)
-        : rows;
+      view === 'today' ? rows.filter((r) => r.stats.dueToday || r.stats.amountToday > 0) : rows;
     return [...list].sort((a, b) => {
       if (a.stats.doneToday !== b.stats.doneToday) return a.stats.doneToday ? 1 : -1;
       return b.stats.current - a.stats.current;
@@ -46,37 +67,44 @@ export default function HabitsScreen({ theme }) {
     : 0;
 
   return (
-    <View style={{ flex: 1 }}>
-      <ScreenHeader
+    <View style={{ flex: 1, backgroundColor: theme.colors.background }}>
+      <NavBar
         theme={theme}
         title="Habits"
-        subtitle={
-          rows.length
-            ? `${doneToday} of ${dueToday || rows.length} done today`
-            : 'What do you want to repeat?'
-        }
+        scrollY={scrollY}
+        threshold={54}
         right={
-          <TouchableOpacity
+          <RoundButton
+            theme={theme}
+            glyph="plus"
+            size={32}
+            weight={2.3}
+            color={theme.colors.primary}
+            fg="#FFFFFF"
             onPress={() => setEditing('new')}
-            activeOpacity={0.8}
-            style={{
-              paddingHorizontal: 14,
-              paddingVertical: 9,
-              borderRadius: theme.borderRadius.md,
-              backgroundColor: theme.colors.primary,
-            }}
-          >
-            <Text style={{ color: '#FFF', fontWeight: '700', fontSize: theme.fontSize.sm }}>
-              + New
-            </Text>
-          </TouchableOpacity>
+          />
         }
       />
 
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 120 }}>
+      <Animated.ScrollView
+        showsVerticalScrollIndicator={false}
+        onScroll={onScroll}
+        scrollEventThrottle={scrollEventThrottle}
+        contentContainerStyle={{ paddingTop: headerSpace, paddingBottom: tabBar + 32 }}
+      >
+        <LargeTitle
+          theme={theme}
+          title="Habits"
+          subtitle={
+            rows.length
+              ? `${doneToday} of ${dueToday || rows.length} done today`
+              : 'What do you want to repeat?'
+          }
+        />
+
         {!!rows.length && (
-          <>
-            <View style={{ paddingHorizontal: 20, paddingTop: 8 }}>
+          <FadeIn>
+            <View style={{ paddingHorizontal: theme.screen, marginTop: 6 }}>
               <Segmented
                 theme={theme}
                 options={[
@@ -88,56 +116,57 @@ export default function HabitsScreen({ theme }) {
               />
             </View>
 
-            <View style={{ flexDirection: 'row', gap: 10, paddingHorizontal: 20, marginTop: 16 }}>
+            <View style={{ flexDirection: 'row', gap: 10, paddingHorizontal: theme.screen, marginTop: 16 }}>
               <StatTile
                 theme={theme}
                 label="Done today"
                 value={`${doneToday}/${dueToday || rows.length}`}
-                icon="✓"
+                glyph="check"
               />
               <StatTile
                 theme={theme}
                 label="Best streak"
                 value={bestStreak}
-                sub={bestStreak ? 'days' : 'no streak yet'}
-                icon="🔥"
+                sub={bestStreak ? 'days' : 'not yet'}
+                glyph="flame"
                 color={theme.colors.warning}
               />
               <StatTile
                 theme={theme}
                 label="Consistency"
                 value={`${avgConsistency}%`}
-                icon="📈"
+                glyph="chart"
                 color={theme.colors.success}
               />
             </View>
-          </>
+          </FadeIn>
         )}
 
-        <View style={{ paddingHorizontal: 20, marginTop: 18 }}>
-          {visible.map((row) => (
-            <HabitCard
-              key={row.habit.id}
-              theme={theme}
-              habit={row.habit}
-              stats={row.stats}
-              week={row.week}
-              state={state}
-              onPress={() => nav.navigate('habitDetail', { id: row.habit.id })}
-              onCheck={() => actions.checkHabit(row.habit.id, row.habit.target || 1)}
-              onUncheck={() => actions.uncheckHabit(row.habit.id)}
-              onSetAmount={(amount) => actions.setHabitAmount(row.habit.id, amount)}
-            />
+        <View style={{ paddingHorizontal: theme.screen, marginTop: 20 }}>
+          {visible.map((row, i) => (
+            <FadeIn key={row.habit.id} delay={Math.min(i, 6) * 45}>
+              <HabitCard
+                theme={theme}
+                habit={row.habit}
+                stats={row.stats}
+                week={row.week}
+                history={row.history}
+                state={state}
+                onPress={() => nav.navigate('habitDetail', { id: row.habit.id })}
+                onCheck={() => actions.checkHabit(row.habit.id, row.habit.target || 1)}
+                onUncheck={() => actions.uncheckHabit(row.habit.id)}
+                onSetAmount={(amount) => actions.setHabitAmount(row.habit.id, amount)}
+              />
+            </FadeIn>
           ))}
 
           {!rows.length && (
             <Card theme={theme}>
               <EmptyBlock
                 theme={theme}
-                compact
-                icon="🔁"
-                title="No habits yet"
-                sub="Habits are the things you repeat until they stop needing willpower. Add one, link it to a commitment, and every check-in will count toward something bigger."
+                glyph="grid"
+                title="Start building your first habit."
+                sub="Habits are the things you repeat until they stop needing willpower. Link one to a commitment and every check-in counts toward something bigger."
                 actionLabel="Create a habit"
                 onAction={() => setEditing('new')}
               />
@@ -149,14 +178,15 @@ export default function HabitsScreen({ theme }) {
               <EmptyBlock
                 theme={theme}
                 compact
-                icon="✓"
+                glyph="check"
+                color={theme.colors.success}
                 title="All done for today"
                 sub="Nothing else is scheduled. Switch to All to see every habit."
               />
             </Card>
           )}
         </View>
-      </ScrollView>
+      </Animated.ScrollView>
 
       <HabitEditor
         theme={theme}

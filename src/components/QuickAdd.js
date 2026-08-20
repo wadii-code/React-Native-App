@@ -6,9 +6,8 @@
  * a wrong guess costs one tap rather than a wrong record.
  */
 import React, { useMemo, useState, useEffect } from 'react';
-import { View, Text, TouchableOpacity, ScrollView } from 'react-native';
-import * as Haptics from 'expo-haptics';
-import { Sheet, TextField, Field, Chip, SheetActions } from './ui';
+import { View, Text, ScrollView } from 'react-native';
+import { Sheet, TextField, Field, Chip, Icon, PressableScale, haptic } from './ui';
 import { DateChoice } from './pickers';
 import { SingleSelect } from './LinkPicker';
 import { parseQuickAdd } from '../domain/nlp';
@@ -17,11 +16,11 @@ import { PRIORITIES, withAlpha } from '../theme';
 import { startOfToday, formatTime } from '../utils';
 
 const TYPES = [
-  { id: 'task', label: 'Task', icon: '☑', hint: 'Something to do' },
-  { id: 'habit', label: 'Habit', icon: '🔁', hint: 'Something to repeat' },
-  { id: 'challenge', label: 'Challenge', icon: '🔥', hint: 'A push with an end date' },
-  { id: 'goal', label: 'Goal', icon: '🎯', hint: 'Where you want to get to' },
-  { id: 'commitment', label: 'Commitment', icon: '🌱', hint: 'What you are becoming' },
+  { id: 'task', label: 'Task', glyph: 'check', hint: 'Something to do' },
+  { id: 'habit', label: 'Habit', glyph: 'repeat', hint: 'Something to repeat' },
+  { id: 'challenge', label: 'Challenge', glyph: 'flame', hint: 'A push with an end date' },
+  { id: 'goal', label: 'Goal', glyph: 'target', hint: 'Where you want to get to' },
+  { id: 'commitment', label: 'Commitment', glyph: 'summit', hint: 'What you are becoming' },
 ];
 
 const EXAMPLES = [
@@ -61,7 +60,6 @@ export default function QuickAdd({ theme, visible, state, actions, onClose, init
 
   const create = () => {
     if (!canCreate) return;
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     const links = commitmentId
       ? { commitmentIds: [commitmentId], goalIds: [], challengeIds: [], milestoneIds: [] }
       : undefined;
@@ -110,7 +108,16 @@ export default function QuickAdd({ theme, visible, state, actions, onClose, init
   const typeMeta = TYPES.find((t) => t.id === type);
 
   return (
-    <Sheet theme={theme} visible={visible} onClose={onClose} title="Quick add">
+    <Sheet
+      theme={theme}
+      visible={visible}
+      onClose={onClose}
+      title="Quick add"
+      cancelLabel="Cancel"
+      confirmLabel="Add"
+      onConfirm={create}
+      confirmDisabled={!canCreate}
+    >
       <TextField
         theme={theme}
         value={text}
@@ -119,22 +126,26 @@ export default function QuickAdd({ theme, visible, state, actions, onClose, init
         autoFocus
         returnKeyType="done"
         onSubmitEditing={create}
-        style={{ fontSize: theme.fontSize.lg, minHeight: 52 }}
+        style={{ ...theme.type.title3, minHeight: 56 }}
       />
 
+      {/* What the parser understood. Read-only, and always overridable below. */}
       {!!parsed.chips.length && (
-        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 10 }}>
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 12 }}>
           {parsed.chips.map((chip, i) => (
             <View
               key={i}
               style={{
+                flexDirection: 'row',
+                alignItems: 'center',
                 paddingHorizontal: 9,
-                paddingVertical: 4,
-                borderRadius: 7,
-                backgroundColor: withAlpha(theme.colors.primary, 0.12),
+                paddingVertical: 5,
+                borderRadius: theme.radius.xs,
+                backgroundColor: withAlpha(theme.colors.primary, theme.dark ? 0.2 : 0.11),
               }}
             >
-              <Text style={{ fontSize: 11.5, fontWeight: '600', color: theme.colors.primary }}>
+              <Icon name="sparkle" size={9} color={theme.colors.primary} />
+              <Text style={{ ...theme.type.caption2, color: theme.colors.primary, marginLeft: 5 }}>
                 {chip.label}
               </Text>
             </View>
@@ -143,45 +154,34 @@ export default function QuickAdd({ theme, visible, state, actions, onClose, init
       )}
 
       {!text.trim() && (
-        <View style={{ marginTop: 16 }}>
-          <Text style={{ fontSize: theme.fontSize.xs, color: theme.colors.textTertiary, marginBottom: 8 }}>
-            Try typing:
+        <View style={{ marginTop: 18 }}>
+          <Text style={{ ...theme.type.footnoteEmph, color: theme.colors.textSecondary, marginBottom: 9 }}>
+            Try typing
           </Text>
           {EXAMPLES.map((ex) => (
-            <TouchableOpacity
+            <PressableScale
               key={ex}
-              onPress={() => {
-                Haptics.selectionAsync();
-                setText(ex);
-              }}
-              activeOpacity={0.7}
+              onPress={() => setText(ex)}
+              scaleTo={0.98}
               style={{
-                paddingVertical: 9,
-                paddingHorizontal: 12,
-                borderRadius: theme.borderRadius.sm,
-                backgroundColor: theme.colors.inputBg,
-                marginBottom: 6,
+                flexDirection: 'row',
+                alignItems: 'center',
+                paddingVertical: 11,
+                paddingHorizontal: 13,
+                borderRadius: theme.radius.sm,
+                backgroundColor: theme.colors.fill1,
+                marginBottom: 7,
               }}
             >
-              <Text style={{ fontSize: theme.fontSize.sm, color: theme.colors.textSecondary }}>
-                {ex}
-              </Text>
-            </TouchableOpacity>
+              <Text style={{ flex: 1, ...theme.type.subhead, color: theme.colors.textSecondary }}>{ex}</Text>
+              <Icon name="chevronRight" size={12} color={theme.colors.textQuaternary} weight={2} />
+            </PressableScale>
           ))}
         </View>
       )}
 
-      <View style={{ marginTop: 20 }}>
-        <Text
-          style={{
-            fontSize: theme.fontSize.xs,
-            fontWeight: '700',
-            letterSpacing: 0.6,
-            textTransform: 'uppercase',
-            color: theme.colors.textSecondary,
-            marginBottom: 8,
-          }}
-        >
+      <View style={{ marginTop: 22 }}>
+        <Text style={{ ...theme.type.footnoteEmph, color: theme.colors.textSecondary, marginBottom: 9 }}>
           Create as
         </Text>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
@@ -190,14 +190,14 @@ export default function QuickAdd({ theme, visible, state, actions, onClose, init
               key={t.id}
               theme={theme}
               label={t.label}
-              icon={t.icon}
+              glyph={t.glyph}
               active={type === t.id}
               onPress={() => setTypeOverride(t.id)}
             />
           ))}
         </ScrollView>
         {!!typeMeta && (
-          <Text style={{ fontSize: theme.fontSize.xs, color: theme.colors.textTertiary, marginTop: 8 }}>
+          <Text style={{ ...theme.type.caption, color: theme.colors.textTertiary, marginTop: 9 }}>
             {typeMeta.hint}
             {type === 'habit' && parsed.schedule ? ` · ${scheduleLabel(parsed.schedule)}` : ''}
             {type === 'habit' && parsed.dueTime != null ? ` · reminder ${formatTime(parsed.dueTime)}` : ''}
@@ -206,7 +206,7 @@ export default function QuickAdd({ theme, visible, state, actions, onClose, init
         )}
       </View>
 
-      <View style={{ height: 18 }} />
+      <View style={{ height: 22 }} />
 
       {(type === 'task' || type === 'goal' || type === 'commitment') && (
         <Field theme={theme} label={type === 'task' ? 'Due' : 'Target date'}>
@@ -253,7 +253,11 @@ export default function QuickAdd({ theme, visible, state, actions, onClose, init
       )}
 
       {type !== 'commitment' && state.commitments.length > 0 && (
-        <Field theme={theme} label="Serves commitment" hint="Link it now and it starts counting immediately.">
+        <Field
+          theme={theme}
+          label="Serves commitment"
+          hint="Link it now and it starts counting immediately."
+        >
           <SingleSelect
             theme={theme}
             options={state.commitments
@@ -265,14 +269,6 @@ export default function QuickAdd({ theme, visible, state, actions, onClose, init
           />
         </Field>
       )}
-
-      <SheetActions
-        theme={theme}
-        onCancel={onClose}
-        onConfirm={create}
-        confirmLabel={`Add ${typeMeta ? typeMeta.label.toLowerCase() : 'item'}`}
-        disabled={!canCreate}
-      />
     </Sheet>
   );
 }

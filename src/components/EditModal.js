@@ -1,27 +1,94 @@
+/**
+ * The task editor.
+ *
+ * Everything a task can carry is here, but almost none of it is on screen at
+ * once: name, priority, category and dates are always visible because they are
+ * always used, and repeat, connections, project, notes and subtasks live behind
+ * disclosure rows that remember nothing and cost nothing to open.
+ *
+ * Presented as an iOS sheet - drag it down to dismiss, Cancel and Save in the
+ * header where the thumb expects them.
+ */
 import React, { useState, useEffect, useRef } from 'react';
-import {
-  View,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  Modal,
-  Animated,
-  ScrollView,
-  KeyboardAvoidingView,
-  Platform,
-  StyleSheet,
-} from 'react-native';
-import * as Haptics from 'expo-haptics';
-import { PRIORITIES, CATEGORIES } from '../theme';
+import { View, Text, TextInput, Pressable, Animated, LayoutAnimation, StyleSheet } from 'react-native';
+import { PRIORITIES, CATEGORIES, withAlpha } from '../theme';
 import { DateChoice, TimeChoice } from './pickers';
 import { ConnectionsFields, SingleSelect } from './LinkPicker';
 import { RECURRENCE_PRESETS, normalizeRecurrence, recurrenceLabel } from '../domain/recurrence';
+import {
+  Sheet,
+  Field,
+  TextField,
+  Chip,
+  Checkbox,
+  Icon,
+  Button,
+  PressableScale,
+  haptic,
+} from './ui';
 
 function generateId() {
   return Date.now().toString(36) + Math.random().toString(36).substring(2, 9);
 }
 
 const emptyLinks = { commitmentIds: [], goalIds: [], challengeIds: [], milestoneIds: [], habitId: null };
+
+/* ----------------------------------------------------------- disclosure */
+
+/**
+ * A row that opens a section. The chevron rotates rather than swapping glyphs,
+ * which is the small difference between a control that feels made and one that
+ * feels assembled.
+ */
+function Disclosure({ theme, glyph, label, badge, open, onPress, children }) {
+  const spin = useRef(new Animated.Value(open ? 1 : 0)).current;
+
+  useEffect(() => {
+    Animated.timing(spin, { toValue: open ? 1 : 0, duration: 180, useNativeDriver: true }).start();
+  }, [open, spin]);
+
+  return (
+    <View style={{ marginBottom: 10 }}>
+      <Pressable
+        onPress={() => {
+          haptic('selection');
+          LayoutAnimation.configureNext(LayoutAnimation.create(180, 'easeInEaseOut', 'opacity'));
+          onPress();
+        }}
+        style={{
+          flexDirection: 'row',
+          alignItems: 'center',
+          paddingHorizontal: 14,
+          paddingVertical: 13,
+          borderRadius: theme.radius.md,
+          backgroundColor: theme.colors.fill1,
+        }}
+      >
+        <Icon name={glyph} size={16} color={theme.colors.textSecondary} />
+        <Text style={{ flex: 1, marginLeft: 11, ...theme.type.callout, color: theme.colors.text }}>
+          {label}
+        </Text>
+        {!!badge && (
+          <Text style={{ ...theme.type.footnote, color: theme.colors.textTertiary, marginRight: 9 }}>
+            {badge}
+          </Text>
+        )}
+        <Animated.View
+          style={{
+            transform: [
+              { rotate: spin.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '90deg'] }) },
+            ],
+          }}
+        >
+          <Icon name="chevronRight" size={13} color={theme.colors.textQuaternary} weight={2} />
+        </Animated.View>
+      </Pressable>
+      {open && <View style={{ paddingTop: 14, paddingHorizontal: 2 }}>{children}</View>}
+    </View>
+  );
+}
+
+/* ---------------------------------------------------------------- editor */
 
 export default function EditModal({ task, onSave, onDelete, onClose, theme, state }) {
   const [text, setText] = useState('');
@@ -38,56 +105,27 @@ export default function EditModal({ task, onSave, onDelete, onClose, theme, stat
   const [labelDraft, setLabelDraft] = useState('');
   const [links, setLinks] = useState(emptyLinks);
   const [expandedSection, setExpandedSection] = useState(null);
-  const slideAnim = useRef(new Animated.Value(300)).current;
-  const fadeAnim = useRef(new Animated.Value(0)).current;
-  const inputRef = useRef(null);
-  const focusTimer = useRef(null);
-  const subtaskInputRef = useRef(null);
 
   useEffect(() => {
-    return () => {
-      if (focusTimer.current) clearTimeout(focusTimer.current);
-    };
-  }, []);
-
-  useEffect(() => {
-    if (task) {
-      setText(task.text);
-      setPriorityId(task.priority || 'none');
-      setCategoryId(task.category || null);
-      setDueDate(task.dueDate || null);
-      setDueTime(task.dueTime == null ? null : task.dueTime);
-      setNotes(task.notes || '');
-      setSubtasks(task.subtasks ? [...task.subtasks] : []);
-      setRecurrenceType(normalizeRecurrence(task.recurrence)?.type || null);
-      setProjectId(task.projectId || null);
-      setLabels(task.labels ? [...task.labels] : []);
-      setLinks({ ...emptyLinks, ...(task.links || {}) });
-      setLabelDraft('');
-      setExpandedSection(null);
-      Animated.parallel([
-        Animated.spring(slideAnim, { toValue: 0, damping: 20, stiffness: 200, useNativeDriver: true }),
-        Animated.timing(fadeAnim, { toValue: 1, duration: 200, useNativeDriver: true }),
-      ]).start(() => {
-        focusTimer.current = setTimeout(() => inputRef.current?.focus(), 300);
-      });
-    } else {
-      if (focusTimer.current) clearTimeout(focusTimer.current);
-      slideAnim.setValue(300);
-      fadeAnim.setValue(0);
-    }
+    if (!task) return;
+    setText(task.text);
+    setPriorityId(task.priority || 'none');
+    setCategoryId(task.category || null);
+    setDueDate(task.dueDate || null);
+    setDueTime(task.dueTime == null ? null : task.dueTime);
+    setNotes(task.notes || '');
+    setSubtasks(task.subtasks ? [...task.subtasks] : []);
+    setRecurrenceType(normalizeRecurrence(task.recurrence)?.type || null);
+    setProjectId(task.projectId || null);
+    setLabels(task.labels ? [...task.labels] : []);
+    setLinks({ ...emptyLinks, ...(task.links || {}) });
+    setLabelDraft('');
+    setNewSubtaskText('');
+    setExpandedSection(null);
   }, [task]);
-
-  const handleClose = () => {
-    Animated.parallel([
-      Animated.timing(slideAnim, { toValue: 300, duration: 200, useNativeDriver: true }),
-      Animated.timing(fadeAnim, { toValue: 0, duration: 200, useNativeDriver: true }),
-    ]).start(() => onClose());
-  };
 
   const handleSave = () => {
     if (!task || !text.trim()) return;
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     onSave(task.id, {
       text: text.trim(),
       priority: priorityId,
@@ -101,37 +139,25 @@ export default function EditModal({ task, onSave, onDelete, onClose, theme, stat
       labels,
       links,
     });
-    handleClose();
+    onClose();
   };
 
   const handleDelete = () => {
     if (!task) return;
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+    haptic('warning');
     onDelete(task.id);
-    handleClose();
+    onClose();
   };
 
   const handleAddSubtask = () => {
     if (!newSubtaskText.trim()) return;
-    Haptics.selectionAsync();
+    haptic('selection');
     setSubtasks((prev) => [...prev, { id: generateId(), text: newSubtaskText.trim(), done: false }]);
     setNewSubtaskText('');
   };
 
-  const handleToggleSubtask = (subtaskId) => {
-    Haptics.selectionAsync();
-    setSubtasks((prev) => prev.map((st) => (st.id === subtaskId ? { ...st, done: !st.done } : st)));
-  };
-
-  const handleDeleteSubtask = (subtaskId) => {
-    Haptics.selectionAsync();
-    setSubtasks((prev) => prev.filter((st) => st.id !== subtaskId));
-  };
-
-  const toggleSection = (section) => {
-    Haptics.selectionAsync();
+  const toggleSection = (section) =>
     setExpandedSection((prev) => (prev === section ? null : section));
-  };
 
   if (!task) return null;
 
@@ -142,661 +168,317 @@ export default function EditModal({ task, onSave, onDelete, onClose, theme, stat
   const habits = state?.habits || [];
 
   return (
-    <Modal visible={!!task} transparent animationType="none" onRequestClose={handleClose}>
-      <KeyboardAvoidingView style={s.overlay} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-        <Animated.View style={[s.backdrop, { opacity: fadeAnim }]}>
-          <TouchableOpacity style={s.backdropTouch} onPress={handleClose} activeOpacity={1} />
-        </Animated.View>
-        <Animated.View
-          style={[
-            s.sheet,
-            { backgroundColor: theme.colors.surface, transform: [{ translateY: slideAnim }] },
-          ]}
-        >
-          <View style={s.handle} />
-          <Text style={[s.sheetTitle, { color: theme.colors.text }]}>Edit Task</Text>
+    <Sheet
+      theme={theme}
+      visible={!!task}
+      onClose={onClose}
+      title="Edit task"
+      cancelLabel="Cancel"
+      confirmLabel="Save"
+      onConfirm={handleSave}
+      confirmDisabled={!text.trim()}
+      maxHeight="92%"
+    >
+      <TextField
+        theme={theme}
+        value={text}
+        onChangeText={setText}
+        placeholder="Task name"
+        returnKeyType="done"
+        style={{ ...theme.type.title3, minHeight: 54 }}
+      />
 
-          <TextInput
-            ref={inputRef}
-            style={[
-              s.textInput,
-              {
-                color: theme.colors.text,
-                backgroundColor: theme.colors.inputBg,
-                borderColor: theme.colors.border,
-              },
-            ]}
-            value={text}
-            onChangeText={setText}
-            placeholder="Task name"
-            placeholderTextColor={theme.colors.textTertiary}
-            returnKeyType="done"
-          />
+      <View style={{ height: 20 }} />
 
-          <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
-            <Text style={[s.sectionLabel, { color: theme.colors.textSecondary }]}>Priority</Text>
-            <View style={s.row}>
-              {PRIORITIES.map((p) => (
-                <TouchableOpacity
-                  key={p.id}
-                  onPress={() => {
-                    Haptics.selectionAsync();
-                    setPriorityId(p.id);
-                  }}
-                  style={[
-                    s.selectBtn,
-                    {
-                      backgroundColor: priorityId === p.id ? p.color + '20' : theme.colors.inputBg,
-                      borderColor: priorityId === p.id ? p.color : theme.colors.border,
-                    },
-                  ]}
-                >
-                  <View style={[s.dot, { backgroundColor: p.color }]} />
-                  <Text
-                    style={[
-                      s.selectText,
-                      {
-                        color: priorityId === p.id ? p.color : theme.colors.textSecondary,
-                        fontWeight: priorityId === p.id ? '600' : '400',
-                      },
-                    ]}
-                  >
-                    {p.label}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-
-            <Text style={[s.sectionLabel, { color: theme.colors.textSecondary }]}>Category</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={s.catScroll}>
-              <TouchableOpacity
-                onPress={() => {
-                  Haptics.selectionAsync();
-                  setCategoryId(null);
-                }}
-                style={[
-                  s.catBtn,
-                  {
-                    backgroundColor: !categoryId ? theme.colors.primaryLight : theme.colors.inputBg,
-                    borderColor: !categoryId ? theme.colors.primary : theme.colors.border,
-                  },
-                ]}
-              >
-                <Text
-                  style={[
-                    s.catText,
-                    { color: !categoryId ? theme.colors.primary : theme.colors.textSecondary },
-                  ]}
-                >
-                  None
-                </Text>
-              </TouchableOpacity>
-              {CATEGORIES.map((c) => (
-                <TouchableOpacity
-                  key={c.id}
-                  onPress={() => {
-                    Haptics.selectionAsync();
-                    setCategoryId(c.id);
-                  }}
-                  style={[
-                    s.catBtn,
-                    {
-                      backgroundColor:
-                        categoryId === c.id ? theme.colors.primaryLight : theme.colors.inputBg,
-                      borderColor: categoryId === c.id ? theme.colors.primary : theme.colors.border,
-                    },
-                  ]}
-                >
-                  <Text style={s.catIcon}>{c.icon}</Text>
-                  <Text
-                    style={[
-                      s.catText,
-                      {
-                        color: categoryId === c.id ? theme.colors.primary : theme.colors.textSecondary,
-                      },
-                    ]}
-                  >
-                    {c.label}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-
-            <Text style={[s.sectionLabel, { color: theme.colors.textSecondary }]}>Due date</Text>
-            <View style={{ marginBottom: 16 }}>
-              <DateChoice theme={theme} value={dueDate} onChange={setDueDate} />
-            </View>
-
-            <Text style={[s.sectionLabel, { color: theme.colors.textSecondary }]}>Time</Text>
-            <View style={{ marginBottom: 16 }}>
-              <TimeChoice theme={theme} value={dueTime} onChange={setDueTime} />
-            </View>
-
-            {/* ------------------------------------------------ recurrence */}
-            <TouchableOpacity
-              onPress={() => toggleSection('recurrence')}
-              style={[s.sectionToggle, { backgroundColor: theme.colors.inputBg }]}
+      <Field theme={theme} label="Priority">
+        <View style={{ flexDirection: 'row', gap: 8 }}>
+          {PRIORITIES.map((p) => (
+            <PressableScale
+              key={p.id}
+              onPress={() => setPriorityId(p.id)}
+              scaleTo={0.94}
+              style={{
+                flex: 1,
+                flexDirection: 'row',
+                alignItems: 'center',
+                justifyContent: 'center',
+                paddingVertical: 11,
+                borderRadius: theme.radius.sm,
+                borderWidth: 1.5,
+                backgroundColor:
+                  priorityId === p.id ? withAlpha(p.color, theme.dark ? 0.22 : 0.12) : theme.colors.fill1,
+                borderColor: priorityId === p.id ? withAlpha(p.color, 0.6) : 'transparent',
+              }}
             >
-              <Text style={[s.sectionToggleText, { color: theme.colors.text }]}>
-                ↻ Repeat{recurrenceType ? ` (${recurrenceLabel({ type: recurrenceType })})` : ''}
-              </Text>
-              <Text style={[s.sectionToggleArrow, { color: theme.colors.textSecondary }]}>
-                {expandedSection === 'recurrence' ? '▾' : '▸'}
-              </Text>
-            </TouchableOpacity>
-            {expandedSection === 'recurrence' && (
-              <View style={[s.row, { flexWrap: 'wrap' }]}>
-                {RECURRENCE_PRESETS.map((r) => (
-                  <TouchableOpacity
-                    key={r.type || 'none'}
-                    onPress={() => {
-                      Haptics.selectionAsync();
-                      setRecurrenceType(r.type);
-                    }}
-                    style={[
-                      s.selectBtn,
-                      {
-                        flex: 0,
-                        paddingHorizontal: 14,
-                        backgroundColor:
-                          recurrenceType === r.type ? theme.colors.primaryLight : theme.colors.inputBg,
-                        borderColor: recurrenceType === r.type ? theme.colors.primary : theme.colors.border,
-                      },
-                    ]}
-                  >
-                    <Text
-                      style={[
-                        s.selectText,
-                        {
-                          color:
-                            recurrenceType === r.type ? theme.colors.primary : theme.colors.textSecondary,
-                          fontWeight: recurrenceType === r.type ? '600' : '400',
-                        },
-                      ]}
-                    >
-                      {r.label}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-            )}
-
-            {/* ----------------------------------------------- connections */}
-            <TouchableOpacity
-              onPress={() => toggleSection('connections')}
-              style={[s.sectionToggle, { backgroundColor: theme.colors.inputBg }]}
-            >
-              <Text style={[s.sectionToggleText, { color: theme.colors.text }]}>
-                ⚭ Connections{linkedCount ? ` (${linkedCount})` : ''}
-              </Text>
-              <Text style={[s.sectionToggleArrow, { color: theme.colors.textSecondary }]}>
-                {expandedSection === 'connections' ? '▾' : '▸'}
-              </Text>
-            </TouchableOpacity>
-            {expandedSection === 'connections' && !!state && (
-              <View style={{ marginBottom: 8 }}>
-                <ConnectionsFields
-                  theme={theme}
-                  state={state}
-                  links={links}
-                  onChange={(patch) => setLinks((l) => ({ ...l, ...patch }))}
-                />
-                <Text style={[s.sectionLabel, { color: theme.colors.textSecondary }]}>
-                  Track as a habit check-in
-                </Text>
-                <View style={{ marginBottom: 16 }}>
-                  <SingleSelect
-                    theme={theme}
-                    options={habits
-                      .filter((h) => !h.archived)
-                      .map((h) => ({ id: h.id, label: h.name, icon: h.icon, color: h.color }))}
-                    value={links.habitId}
-                    onChange={(habitId) => setLinks((l) => ({ ...l, habitId }))}
-                    noneLabel="No"
-                  />
-                  <Text style={{ fontSize: 11, color: theme.colors.textTertiary, marginTop: 6 }}>
-                    Completing this task also checks off that habit for the day - and the other way
-                    round.
-                  </Text>
-                </View>
-              </View>
-            )}
-
-            {/* -------------------------------------------------- project */}
-            <TouchableOpacity
-              onPress={() => toggleSection('project')}
-              style={[s.sectionToggle, { backgroundColor: theme.colors.inputBg }]}
-            >
-              <Text style={[s.sectionToggleText, { color: theme.colors.text }]}>
-                📁 Project & labels
-                {labels.length ? ` (${labels.length} labels)` : ''}
-              </Text>
-              <Text style={[s.sectionToggleArrow, { color: theme.colors.textSecondary }]}>
-                {expandedSection === 'project' ? '▾' : '▸'}
-              </Text>
-            </TouchableOpacity>
-            {expandedSection === 'project' && (
-              <View style={{ marginBottom: 12 }}>
-                <SingleSelect
-                  theme={theme}
-                  options={projects
-                    .filter((p) => !p.archived)
-                    .map((p) => ({ id: p.id, label: p.name, icon: p.icon, color: p.color }))}
-                  value={projectId}
-                  onChange={setProjectId}
-                  noneLabel="Inbox"
-                />
-                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 12 }}>
-                  {labels.map((label) => (
-                    <TouchableOpacity
-                      key={label}
-                      onPress={() => setLabels((prev) => prev.filter((l) => l !== label))}
-                      style={{
-                        flexDirection: 'row',
-                        alignItems: 'center',
-                        paddingHorizontal: 10,
-                        paddingVertical: 6,
-                        borderRadius: 8,
-                        backgroundColor: theme.colors.chip,
-                      }}
-                    >
-                      <Text style={{ fontSize: 12, color: theme.colors.textSecondary }}>
-                        @{label}
-                      </Text>
-                      <Text style={{ fontSize: 12, marginLeft: 6, color: theme.colors.textTertiary }}>
-                        ✕
-                      </Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-                <View style={s.addSubtaskRow}>
-                  <TextInput
-                    style={[
-                      s.subtaskInput,
-                      {
-                        color: theme.colors.text,
-                        backgroundColor: theme.colors.inputBg,
-                        borderColor: theme.colors.border,
-                      },
-                    ]}
-                    value={labelDraft}
-                    onChangeText={setLabelDraft}
-                    placeholder="Add label…"
-                    placeholderTextColor={theme.colors.textTertiary}
-                    autoCapitalize="none"
-                    returnKeyType="done"
-                    onSubmitEditing={() => {
-                      const value = labelDraft.trim().replace(/^@/, '');
-                      if (!value || labels.includes(value)) return;
-                      setLabels((prev) => [...prev, value]);
-                      setLabelDraft('');
-                    }}
-                  />
-                </View>
-              </View>
-            )}
-
-            {/* ---------------------------------------------------- notes */}
-            <TouchableOpacity
-              onPress={() => toggleSection('notes')}
-              style={[s.sectionToggle, { backgroundColor: theme.colors.inputBg }]}
-            >
-              <Text style={[s.sectionToggleText, { color: theme.colors.text }]}>
-                📝 Notes {notes ? '(has content)' : ''}
-              </Text>
-              <Text style={[s.sectionToggleArrow, { color: theme.colors.textSecondary }]}>
-                {expandedSection === 'notes' ? '▾' : '▸'}
-              </Text>
-            </TouchableOpacity>
-            {expandedSection === 'notes' && (
-              <TextInput
-                style={[
-                  s.notesInput,
-                  {
-                    color: theme.colors.text,
-                    backgroundColor: theme.colors.inputBg,
-                    borderColor: theme.colors.border,
-                  },
-                ]}
-                value={notes}
-                onChangeText={setNotes}
-                placeholder="Add notes..."
-                placeholderTextColor={theme.colors.textTertiary}
-                multiline
-                numberOfLines={4}
-                textAlignVertical="top"
+              <View
+                style={{ width: 7, height: 7, borderRadius: 3.5, backgroundColor: p.color, marginRight: 6 }}
               />
-            )}
-
-            {/* ------------------------------------------------- subtasks */}
-            <TouchableOpacity
-              onPress={() => toggleSection('subtasks')}
-              style={[s.sectionToggle, { backgroundColor: theme.colors.inputBg }]}
-            >
-              <Text style={[s.sectionToggleText, { color: theme.colors.text }]}>
-                ☑ Subtasks {subtasks.length > 0 ? `(${completedSubtasks}/${subtasks.length})` : ''}
-              </Text>
-              <Text style={[s.sectionToggleArrow, { color: theme.colors.textSecondary }]}>
-                {expandedSection === 'subtasks' ? '▾' : '▸'}
-              </Text>
-            </TouchableOpacity>
-            {expandedSection === 'subtasks' && (
-              <View>
-                {subtasks.map((st) => (
-                  <View key={st.id} style={[s.subtaskRow, { borderBottomColor: theme.colors.border }]}>
-                    <TouchableOpacity
-                      onPress={() => handleToggleSubtask(st.id)}
-                      style={[
-                        s.subtaskCheckbox,
-                        {
-                          borderColor: st.done ? theme.colors.success : theme.colors.border,
-                          backgroundColor: st.done ? theme.colors.success : 'transparent',
-                        },
-                      ]}
-                    >
-                      {st.done && <Text style={s.checkmarkSmall}>✓</Text>}
-                    </TouchableOpacity>
-                    <Text
-                      style={[
-                        s.subtaskText,
-                        {
-                          color: st.done ? theme.colors.textTertiary : theme.colors.text,
-                          textDecorationLine: st.done ? 'line-through' : 'none',
-                        },
-                      ]}
-                    >
-                      {st.text}
-                    </Text>
-                    <TouchableOpacity onPress={() => handleDeleteSubtask(st.id)}>
-                      <Text style={[s.subtaskDelete, { color: theme.colors.danger }]}>✕</Text>
-                    </TouchableOpacity>
-                  </View>
-                ))}
-                <View style={s.addSubtaskRow}>
-                  <TextInput
-                    ref={subtaskInputRef}
-                    style={[
-                      s.subtaskInput,
-                      {
-                        color: theme.colors.text,
-                        backgroundColor: theme.colors.inputBg,
-                        borderColor: theme.colors.border,
-                      },
-                    ]}
-                    value={newSubtaskText}
-                    onChangeText={setNewSubtaskText}
-                    placeholder="Add subtask..."
-                    placeholderTextColor={theme.colors.textTertiary}
-                    returnKeyType="done"
-                    onSubmitEditing={handleAddSubtask}
-                  />
-                  <TouchableOpacity
-                    onPress={handleAddSubtask}
-                    style={[
-                      s.addSubtaskBtn,
-                      { backgroundColor: newSubtaskText.trim() ? theme.colors.primary : theme.colors.chip },
-                    ]}
-                    disabled={!newSubtaskText.trim()}
-                  >
-                    <Text
-                      style={[
-                        s.addSubtaskBtnText,
-                        { color: newSubtaskText.trim() ? '#FFF' : theme.colors.textTertiary },
-                      ]}
-                    >
-                      +
-                    </Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
-            )}
-          </ScrollView>
-
-          <View style={s.actions}>
-            <TouchableOpacity
-              onPress={handleDelete}
-              style={[s.deleteBtn, { backgroundColor: theme.colors.dangerLight }]}
-            >
-              <Text style={[s.deleteBtnText, { color: theme.colors.danger }]}>Delete</Text>
-            </TouchableOpacity>
-            <View style={s.rightActions}>
-              <TouchableOpacity
-                onPress={handleClose}
-                style={[s.cancelBtn, { backgroundColor: theme.colors.inputBg }]}
+              <Text
+                style={{
+                  ...theme.type.caption,
+                  fontWeight: priorityId === p.id ? '700' : '500',
+                  color: priorityId === p.id ? p.color : theme.colors.textSecondary,
+                }}
               >
-                <Text style={[s.cancelBtnText, { color: theme.colors.textSecondary }]}>Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                onPress={handleSave}
-                style={[
-                  s.saveBtn,
-                  { backgroundColor: text.trim() ? theme.colors.primary : theme.colors.chip },
-                ]}
-                disabled={!text.trim()}
+                {p.label}
+              </Text>
+            </PressableScale>
+          ))}
+        </View>
+      </Field>
+
+      <Field theme={theme} label="Category">
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+          <Chip theme={theme} label="None" active={!categoryId} onPress={() => setCategoryId(null)} />
+          {CATEGORIES.map((c) => (
+            <Chip
+              key={c.id}
+              theme={theme}
+              label={c.label}
+              icon={c.icon}
+              active={categoryId === c.id}
+              onPress={() => setCategoryId(c.id)}
+            />
+          ))}
+        </View>
+      </Field>
+
+      <Field theme={theme} label="Due date">
+        <DateChoice theme={theme} value={dueDate} onChange={setDueDate} />
+      </Field>
+
+      <Field theme={theme} label="Time">
+        <TimeChoice theme={theme} value={dueTime} onChange={setDueTime} />
+      </Field>
+
+      {/* ------------------------------------------------------ repeat */}
+      <Disclosure
+        theme={theme}
+        glyph="repeat"
+        label="Repeat"
+        badge={recurrenceType ? recurrenceLabel({ type: recurrenceType }) : null}
+        open={expandedSection === 'recurrence'}
+        onPress={() => toggleSection('recurrence')}
+      >
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+          {RECURRENCE_PRESETS.map((r) => (
+            <Chip
+              key={r.type || 'none'}
+              theme={theme}
+              label={r.label}
+              active={recurrenceType === r.type}
+              onPress={() => setRecurrenceType(r.type)}
+            />
+          ))}
+        </View>
+      </Disclosure>
+
+      {/* ------------------------------------------------- connections */}
+      <Disclosure
+        theme={theme}
+        glyph="target"
+        label="Connections"
+        badge={linkedCount ? `${linkedCount}` : null}
+        open={expandedSection === 'connections'}
+        onPress={() => toggleSection('connections')}
+      >
+        {!!state && (
+          <>
+            <ConnectionsFields
+              theme={theme}
+              state={state}
+              links={links}
+              onChange={(patch) => setLinks((l) => ({ ...l, ...patch }))}
+            />
+            <Field
+              theme={theme}
+              label="Track as a habit check-in"
+              hint="Completing this task also checks off that habit for the day — and the other way round."
+            >
+              <SingleSelect
+                theme={theme}
+                options={habits
+                  .filter((h) => !h.archived)
+                  .map((h) => ({ id: h.id, label: h.name, icon: h.icon, color: h.color }))}
+                value={links.habitId}
+                onChange={(habitId) => setLinks((l) => ({ ...l, habitId }))}
+                noneLabel="No"
+              />
+            </Field>
+          </>
+        )}
+      </Disclosure>
+
+      {/* ---------------------------------------------------- project */}
+      <Disclosure
+        theme={theme}
+        glyph="folder"
+        label="Project & labels"
+        badge={labels.length ? `${labels.length} labels` : null}
+        open={expandedSection === 'project'}
+        onPress={() => toggleSection('project')}
+      >
+        <SingleSelect
+          theme={theme}
+          options={projects
+            .filter((p) => !p.archived)
+            .map((p) => ({ id: p.id, label: p.name, icon: p.icon, color: p.color }))}
+          value={projectId}
+          onChange={setProjectId}
+          noneLabel="Inbox"
+        />
+        {!!labels.length && (
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 7, marginTop: 14 }}>
+            {labels.map((label) => (
+              <PressableScale
+                key={label}
+                onPress={() => setLabels((prev) => prev.filter((l) => l !== label))}
+                scaleTo={0.92}
+                style={{
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  paddingHorizontal: 10,
+                  paddingVertical: 6,
+                  borderRadius: theme.radius.full,
+                  backgroundColor: theme.colors.fill2,
+                }}
               >
-                <Text
-                  style={[
-                    s.saveBtnText,
-                    { color: text.trim() ? '#FFF' : theme.colors.textTertiary },
-                  ]}
-                >
-                  Save
-                </Text>
-              </TouchableOpacity>
-            </View>
+                <Text style={{ ...theme.type.caption, color: theme.colors.textSecondary }}>@{label}</Text>
+                <Icon name="close" size={9} color={theme.colors.textTertiary} weight={1.8} style={{ marginLeft: 6 }} />
+              </PressableScale>
+            ))}
           </View>
-        </Animated.View>
-      </KeyboardAvoidingView>
-    </Modal>
+        )}
+        <View style={{ marginTop: 12 }}>
+          <TextField
+            theme={theme}
+            value={labelDraft}
+            onChangeText={setLabelDraft}
+            placeholder="Add a label"
+            autoCapitalize="none"
+            returnKeyType="done"
+            onSubmitEditing={() => {
+              const value = labelDraft.trim().replace(/^@/, '');
+              if (!value || labels.includes(value)) return;
+              setLabels((prev) => [...prev, value]);
+              setLabelDraft('');
+            }}
+          />
+        </View>
+      </Disclosure>
+
+      {/* ------------------------------------------------------- notes */}
+      <Disclosure
+        theme={theme}
+        glyph="list"
+        label="Notes"
+        badge={notes ? 'written' : null}
+        open={expandedSection === 'notes'}
+        onPress={() => toggleSection('notes')}
+      >
+        <TextField
+          theme={theme}
+          value={notes}
+          onChangeText={setNotes}
+          placeholder="Anything worth remembering"
+          multiline
+        />
+      </Disclosure>
+
+      {/* ---------------------------------------------------- subtasks */}
+      <Disclosure
+        theme={theme}
+        glyph="check"
+        label="Subtasks"
+        badge={subtasks.length ? `${completedSubtasks}/${subtasks.length}` : null}
+        open={expandedSection === 'subtasks'}
+        onPress={() => toggleSection('subtasks')}
+      >
+        {subtasks.map((st) => (
+          <View
+            key={st.id}
+            style={{
+              flexDirection: 'row',
+              alignItems: 'center',
+              paddingVertical: 11,
+              borderBottomWidth: StyleSheet.hairlineWidth,
+              borderBottomColor: theme.colors.separator,
+            }}
+          >
+            <Checkbox
+              theme={theme}
+              checked={st.done}
+              size={20}
+              color={theme.colors.success}
+              onPress={() =>
+                setSubtasks((prev) => prev.map((x) => (x.id === st.id ? { ...x, done: !x.done } : x)))
+              }
+            />
+            <Text
+              style={{
+                flex: 1,
+                marginLeft: 12,
+                ...theme.type.callout,
+                color: st.done ? theme.colors.textTertiary : theme.colors.text,
+                textDecorationLine: st.done ? 'line-through' : 'none',
+              }}
+            >
+              {st.text}
+            </Text>
+            <Pressable
+              onPress={() => {
+                haptic('selection');
+                setSubtasks((prev) => prev.filter((x) => x.id !== st.id));
+              }}
+              hitSlop={theme.hit}
+            >
+              <Icon name="close" size={12} color={theme.colors.danger} weight={2} />
+            </Pressable>
+          </View>
+        ))}
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 12 }}>
+          <View style={{ flex: 1 }}>
+            <TextField
+              theme={theme}
+              value={newSubtaskText}
+              onChangeText={setNewSubtaskText}
+              placeholder="Add a subtask"
+              returnKeyType="done"
+              onSubmitEditing={handleAddSubtask}
+            />
+          </View>
+          <PressableScale
+            onPress={handleAddSubtask}
+            disabled={!newSubtaskText.trim()}
+            scaleTo={0.9}
+            style={{
+              width: 46,
+              height: 46,
+              borderRadius: theme.radius.md,
+              alignItems: 'center',
+              justifyContent: 'center',
+              backgroundColor: newSubtaskText.trim() ? theme.colors.primary : theme.colors.fill2,
+            }}
+          >
+            <Icon
+              name="plus"
+              size={18}
+              color={newSubtaskText.trim() ? '#FFFFFF' : theme.colors.textTertiary}
+              weight={2.4}
+            />
+          </PressableScale>
+        </View>
+      </Disclosure>
+
+      <View style={{ marginTop: 18, alignItems: 'center' }}>
+        <Button
+          theme={theme}
+          label="Delete task"
+          variant="destructive"
+          glyph="trash"
+          onPress={handleDelete}
+        />
+      </View>
+    </Sheet>
   );
 }
-
-const s = StyleSheet.create({
-  overlay: {
-    flex: 1,
-    justifyContent: 'flex-end',
-  },
-  backdrop: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0,0,0,0.4)',
-  },
-  backdropTouch: {
-    flex: 1,
-  },
-  sheet: {
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    paddingHorizontal: 20,
-    paddingBottom: 34,
-    maxHeight: '85%',
-  },
-  handle: {
-    width: 36,
-    height: 5,
-    borderRadius: 3,
-    backgroundColor: '#D1D1D6',
-    alignSelf: 'center',
-    marginTop: 10,
-    marginBottom: 14,
-  },
-  sheetTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    marginBottom: 16,
-  },
-  textInput: {
-    borderRadius: 12,
-    borderWidth: 1,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    fontSize: 16,
-    marginBottom: 16,
-  },
-  sectionLabel: {
-    fontSize: 13,
-    fontWeight: '600',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-    marginBottom: 8,
-  },
-  row: {
-    flexDirection: 'row',
-    gap: 8,
-    marginBottom: 16,
-  },
-  selectBtn: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 10,
-    borderRadius: 10,
-    borderWidth: 1,
-  },
-  selectText: {
-    fontSize: 13,
-  },
-  dot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    marginRight: 5,
-  },
-  catScroll: {
-    marginBottom: 16,
-  },
-  catBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderRadius: 10,
-    borderWidth: 1,
-    marginRight: 8,
-  },
-  catIcon: {
-    fontSize: 14,
-    marginRight: 5,
-  },
-  catText: {
-    fontSize: 13,
-    fontWeight: '500',
-  },
-  sectionToggle: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    borderRadius: 10,
-    marginBottom: 12,
-  },
-  sectionToggleText: {
-    fontSize: 14,
-    fontWeight: '500',
-  },
-  sectionToggleArrow: {
-    fontSize: 14,
-  },
-  notesInput: {
-    borderRadius: 12,
-    borderWidth: 1,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    fontSize: 14,
-    marginBottom: 16,
-    minHeight: 100,
-  },
-  subtaskRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 10,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-  },
-  subtaskCheckbox: {
-    width: 20,
-    height: 20,
-    borderRadius: 10,
-    borderWidth: 2,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 10,
-  },
-  subtaskText: {
-    flex: 1,
-    fontSize: 14,
-  },
-  subtaskDelete: {
-    fontSize: 14,
-    fontWeight: '600',
-    paddingLeft: 10,
-  },
-  addSubtaskRow: {
-    flexDirection: 'row',
-    gap: 8,
-    marginTop: 8,
-  },
-  subtaskInput: {
-    flex: 1,
-    height: 40,
-    borderRadius: 10,
-    borderWidth: 1,
-    paddingHorizontal: 12,
-    fontSize: 14,
-  },
-  addSubtaskBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: 10,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  addSubtaskBtnText: {
-    fontSize: 20,
-    fontWeight: '600',
-  },
-  actions: {
-    flexDirection: 'row',
-    marginTop: 8,
-    gap: 10,
-  },
-  deleteBtn: {
-    paddingVertical: 14,
-    paddingHorizontal: 18,
-    borderRadius: 12,
-  },
-  deleteBtnText: {
-    fontSize: 15,
-    fontWeight: '600',
-  },
-  rightActions: {
-    flex: 1,
-    flexDirection: 'row',
-    gap: 10,
-  },
-  cancelBtn: {
-    flex: 1,
-    paddingVertical: 14,
-    borderRadius: 12,
-    alignItems: 'center',
-  },
-  cancelBtnText: {
-    fontSize: 15,
-    fontWeight: '500',
-  },
-  saveBtn: {
-    flex: 1,
-    paddingVertical: 14,
-    borderRadius: 12,
-    alignItems: 'center',
-  },
-  saveBtnText: {
-    fontSize: 15,
-    fontWeight: '600',
-  },
-  checkmarkSmall: {
-    color: '#FFF',
-    fontSize: 11,
-    fontWeight: '700',
-  },
-});

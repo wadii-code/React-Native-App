@@ -1,307 +1,261 @@
-import React, { useState, useRef } from 'react';
-import {
-  View,
-  TextInput,
-  TouchableOpacity,
-  Text,
-  ScrollView,
-  Keyboard,
-  StyleSheet,
-} from 'react-native';
-import * as Haptics from 'expo-haptics';
-import { PRIORITIES, CATEGORIES } from '../theme';
+/**
+ * The quick composer that lives above the tab bar on the task list.
+ *
+ * The options it carries are the same four as before - priority, category, due
+ * date, repeat - but they no longer cycle on tap. Cycling is a pattern you only
+ * meet on the web: it hides the choices, gives no way back, and cannot be
+ * learned by looking. Each chip now opens a short action sheet, which shows
+ * every option, marks the current one, and dismisses itself.
+ */
+import React, { useState } from 'react';
+import { View, Text, TextInput, Keyboard, Animated, StyleSheet } from 'react-native';
+import { PRIORITIES, CATEGORIES, withAlpha } from '../theme';
 import { startOfToday, addDays } from '../utils';
+import { Glass, useSafeArea, useKeyboardHeight } from './ui/platform';
+import { ActionSheet } from './ui/sheet';
+import Icon from './ui/icons';
+import { haptic, PressableScale } from './ui/primitives';
 
 const DUE_OPTIONS = [
-  { id: 'none', label: 'No date', icon: '📅' },
-  { id: 'today', label: 'Today', icon: '📅', getValue: () => startOfToday() },
-  { id: 'tomorrow', label: 'Tomorrow', icon: '📅', getValue: () => addDays(startOfToday(), 1) },
-  { id: 'nextWeek', label: 'Next week', icon: '📅', getValue: () => addDays(startOfToday(), 7) },
+  { id: 'none', label: 'No date', getValue: () => null },
+  { id: 'today', label: 'Today', getValue: () => startOfToday() },
+  { id: 'tomorrow', label: 'Tomorrow', getValue: () => addDays(startOfToday(), 1) },
+  { id: 'nextWeek', label: 'Next week', getValue: () => addDays(startOfToday(), 7) },
 ];
 
 const RECURRENCE_OPTIONS = [
   { id: null, label: 'No repeat' },
-  { id: 'daily', label: '↻ Daily' },
-  { id: 'weekly', label: '↻ Weekly' },
-  { id: 'monthly', label: '↻ Monthly' },
+  { id: 'daily', label: 'Daily' },
+  { id: 'weekly', label: 'Weekly' },
+  { id: 'monthly', label: 'Monthly' },
 ];
 
-export default function AddTask({ onAdd, theme }) {
-  const [text, setText] = useState('');
-  const [priorityIdx, setPriorityIdx] = useState(0);
-  const [categoryIdx, setCategoryIdx] = useState(-1);
-  const [dueIdx, setDueIdx] = useState(0);
-  const [recurrenceIdx, setRecurrenceIdx] = useState(0);
-  const inputRef = useRef(null);
-
-  const currentPriority = PRIORITIES[priorityIdx];
-  const currentCategory = categoryIdx >= 0 ? CATEGORIES[categoryIdx] : null;
-  const currentDue = DUE_OPTIONS[dueIdx];
-  const currentRecurrence = RECURRENCE_OPTIONS[recurrenceIdx];
-
-  const cyclePriority = () => {
-    Haptics.selectionAsync();
-    setPriorityIdx((i) => (i + 1) % PRIORITIES.length);
-  };
-
-  const cycleCategory = () => {
-    Haptics.selectionAsync();
-    setCategoryIdx((i) => {
-      const next = i + 1;
-      return next >= CATEGORIES.length ? -1 : next;
-    });
-  };
-
-  const cycleDue = () => {
-    Haptics.selectionAsync();
-    setDueIdx((i) => (i + 1) % DUE_OPTIONS.length);
-  };
-
-  const cycleRecurrence = () => {
-    Haptics.selectionAsync();
-    setRecurrenceIdx((i) => (i + 1) % RECURRENCE_OPTIONS.length);
-  };
-
-  const handleAdd = () => {
-    if (!text.trim()) return;
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    const dueValue = currentDue.getValue ? currentDue.getValue() : null;
-    onAdd(text, currentPriority.id, currentCategory?.id || null, dueValue, '', [], currentRecurrence.id);
-    setText('');
-    setPriorityIdx(0);
-    setCategoryIdx(-1);
-    setDueIdx(0);
-    setRecurrenceIdx(0);
-    Keyboard.dismiss();
-  };
-
-  const hasOptions =
-    currentPriority.id !== 'none' || currentCategory || currentDue.id !== 'none' || currentRecurrence.id;
-
+function OptionChip({ theme, glyph, icon, label, active, color, onPress }) {
+  const tint = color || theme.colors.primary;
   return (
-    <View style={[s.wrapper, { backgroundColor: theme.colors.surface, borderTopColor: theme.colors.border }]}>
-      <View style={s.inputRow}>
-        <TextInput
-          ref={inputRef}
-          style={[s.input, { color: theme.colors.text, backgroundColor: theme.colors.inputBg }]}
-          placeholder="Add a new task..."
-          placeholderTextColor={theme.colors.textTertiary}
-          value={text}
-          onChangeText={setText}
-          onSubmitEditing={handleAdd}
-          returnKeyType="done"
-          blurOnSubmit={false}
-        />
-        <TouchableOpacity
-          onPress={handleAdd}
-          style={[
-            s.addBtn,
-            { backgroundColor: text.trim() ? theme.colors.primary : theme.colors.chip },
-          ]}
-          activeOpacity={0.7}
-          disabled={!text.trim()}
-        >
-          <Text
-            style={[
-              s.addBtnText,
-              { color: text.trim() ? '#FFFFFF' : theme.colors.textTertiary },
-            ]}
-          >
-            +
-          </Text>
-        </TouchableOpacity>
-      </View>
-
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        style={s.optionsRow}
-        contentContainerStyle={s.optionsContent}
+    <PressableScale
+      onPress={onPress}
+      scaleTo={0.94}
+      style={{
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingHorizontal: 10,
+        paddingVertical: 6,
+        borderRadius: theme.radius.full,
+        backgroundColor: active ? withAlpha(tint, theme.dark ? 0.22 : 0.13) : theme.colors.fill1,
+        borderWidth: StyleSheet.hairlineWidth,
+        borderColor: active ? withAlpha(tint, 0.3) : theme.colors.borderLight,
+      }}
+    >
+      {!!glyph && <Icon name={glyph} size={12} color={active ? tint : theme.colors.textTertiary} />}
+      {!glyph && !!icon && <Text style={{ fontSize: 11 }}>{icon}</Text>}
+      <Text
+        style={{
+          ...theme.type.caption,
+          fontWeight: active ? '600' : '500',
+          marginLeft: 5,
+          color: active ? tint : theme.colors.textSecondary,
+        }}
       >
-        <TouchableOpacity
-          onPress={cyclePriority}
-          style={[
-            s.optionChip,
-            {
-              backgroundColor:
-                currentPriority.id !== 'none'
-                  ? currentPriority.color + '20'
-                  : theme.colors.chip,
-              borderColor:
-                currentPriority.id !== 'none'
-                  ? currentPriority.color + '40'
-                  : theme.colors.border,
-            },
-          ]}
-        >
-          <View
-            style={[
-              s.dot,
-              { backgroundColor: currentPriority.color },
-            ]}
-          />
-          <Text
-            style={[
-              s.optionText,
-              {
-                color:
-                  currentPriority.id !== 'none'
-                    ? currentPriority.color
-                    : theme.colors.textSecondary,
-              },
-            ]}
-          >
-            {currentPriority.label}
-          </Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          onPress={cycleCategory}
-          style={[
-            s.optionChip,
-            {
-              backgroundColor: currentCategory
-                ? theme.colors.primaryLight
-                : theme.colors.chip,
-              borderColor: currentCategory
-                ? theme.colors.primary + '40'
-                : theme.colors.border,
-            },
-          ]}
-        >
-          <Text style={s.optionIcon}>{currentCategory ? currentCategory.icon : '📁'}</Text>
-          <Text
-            style={[
-              s.optionText,
-              { color: currentCategory ? theme.colors.primary : theme.colors.textSecondary },
-            ]}
-          >
-            {currentCategory ? currentCategory.label : 'Category'}
-          </Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          onPress={cycleDue}
-          style={[
-            s.optionChip,
-            {
-              backgroundColor:
-                currentDue.id !== 'none'
-                  ? theme.colors.warningLight
-                  : theme.colors.chip,
-              borderColor:
-                currentDue.id !== 'none'
-                  ? theme.colors.warning + '40'
-                  : theme.colors.border,
-            },
-          ]}
-        >
-          <Text style={s.optionIcon}>📅</Text>
-          <Text
-            style={[
-              s.optionText,
-              {
-                color:
-                  currentDue.id !== 'none'
-                    ? theme.colors.warning
-                    : theme.colors.textSecondary,
-              },
-            ]}
-          >
-            {currentDue.label}
-          </Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          onPress={cycleRecurrence}
-          style={[
-            s.optionChip,
-            {
-              backgroundColor: currentRecurrence.id
-                ? theme.colors.successLight
-                : theme.colors.chip,
-              borderColor: currentRecurrence.id
-                ? theme.colors.success + '40'
-                : theme.colors.border,
-            },
-          ]}
-        >
-          <Text style={s.optionIcon}>↻</Text>
-          <Text
-            style={[
-              s.optionText,
-              {
-                color: currentRecurrence.id
-                  ? theme.colors.success
-                  : theme.colors.textSecondary,
-              },
-            ]}
-          >
-            {currentRecurrence.label}
-          </Text>
-        </TouchableOpacity>
-      </ScrollView>
-    </View>
+        {label}
+      </Text>
+    </PressableScale>
   );
 }
 
-const s = StyleSheet.create({
-  wrapper: {
-    borderTopWidth: StyleSheet.hairlineWidth,
-    paddingHorizontal: 20,
-    paddingTop: 12,
-    paddingBottom: 16,
-  },
-  inputRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-  },
-  input: {
-    flex: 1,
-    height: 48,
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    fontSize: 16,
-  },
-  addBtn: {
-    width: 48,
-    height: 48,
-    borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  addBtnText: {
-    fontSize: 24,
-    fontWeight: '600',
-    marginTop: -2,
-  },
-  optionsRow: {
-    marginTop: 10,
-  },
-  optionsContent: {
-    gap: 8,
-  },
-  optionChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 10,
-    borderWidth: 1,
-  },
-  optionIcon: {
-    fontSize: 13,
-    marginRight: 5,
-  },
-  optionText: {
-    fontSize: 13,
-    fontWeight: '500',
-  },
-  dot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    marginRight: 6,
-  },
-});
+export default function AddTask({ onAdd, theme, bottomOffset = 0 }) {
+  const insets = useSafeArea();
+  const keyboard = useKeyboardHeight();
+  const [text, setText] = useState('');
+  const [priorityId, setPriorityId] = useState('none');
+  const [categoryId, setCategoryId] = useState(null);
+  const [dueId, setDueId] = useState('none');
+  const [recurrenceId, setRecurrenceId] = useState(null);
+  const [sheet, setSheet] = useState(null);
+
+  const priority = PRIORITIES.find((p) => p.id === priorityId) || PRIORITIES[0];
+  const category = CATEGORIES.find((c) => c.id === categoryId);
+  const due = DUE_OPTIONS.find((d) => d.id === dueId) || DUE_OPTIONS[0];
+  const recurrence = RECURRENCE_OPTIONS.find((r) => r.id === recurrenceId) || RECURRENCE_OPTIONS[0];
+
+  const canAdd = !!text.trim();
+
+  const handleAdd = () => {
+    if (!canAdd) return;
+    haptic('medium');
+    onAdd(text, priority.id, category ? category.id : null, due.getValue(), '', [], recurrence.id);
+    setText('');
+    setPriorityId('none');
+    setCategoryId(null);
+    setDueId('none');
+    setRecurrenceId(null);
+    Keyboard.dismiss();
+  };
+
+  const sheets = {
+    priority: {
+      title: 'Priority',
+      value: priorityId,
+      options: PRIORITIES.map((p) => ({ id: p.id, label: p.label, onPress: () => setPriorityId(p.id) })),
+    },
+    category: {
+      title: 'Category',
+      value: categoryId,
+      options: [
+        { id: null, label: 'No category', onPress: () => setCategoryId(null) },
+        ...CATEGORIES.map((c) => ({ id: c.id, label: `${c.icon}  ${c.label}`, onPress: () => setCategoryId(c.id) })),
+      ],
+    },
+    due: {
+      title: 'Due date',
+      value: dueId,
+      options: DUE_OPTIONS.map((d) => ({ id: d.id, label: d.label, onPress: () => setDueId(d.id) })),
+    },
+    repeat: {
+      title: 'Repeat',
+      value: recurrenceId,
+      options: RECURRENCE_OPTIONS.map((r) => ({ id: r.id, label: r.label, onPress: () => setRecurrenceId(r.id) })),
+    },
+  };
+
+  const active = sheet ? sheets[sheet] : null;
+
+  return (
+    <>
+      {/* The bar rides the keyboard: it sits above the tab bar normally, and
+       * lands directly on top of the keyboard once one is open. */}
+      <Animated.View
+        style={{
+          position: 'absolute',
+          left: 0,
+          right: 0,
+          bottom: bottomOffset,
+          transform: [
+            {
+              translateY: keyboard.interpolate({
+                inputRange: [0, bottomOffset, bottomOffset + 1000],
+                outputRange: [0, 0, -1000],
+                extrapolate: 'clamp',
+              }),
+            },
+          ],
+        }}
+      >
+        <Glass theme={theme} intensity={80}>
+          <View
+            style={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              right: 0,
+              height: StyleSheet.hairlineWidth,
+              backgroundColor: theme.colors.glassHairline,
+            }}
+          />
+          <View
+            style={{
+              paddingHorizontal: theme.screen,
+              paddingTop: 10,
+              paddingBottom: bottomOffset > 0 ? 10 : Math.max(insets.bottom, 10),
+            }}
+          >
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+              <View
+                style={{
+                  flex: 1,
+                  height: 42,
+                  justifyContent: 'center',
+                  paddingHorizontal: 14,
+                  borderRadius: theme.radius.md,
+                  backgroundColor: theme.colors.fill2,
+                }}
+              >
+                <TextInput
+                  value={text}
+                  onChangeText={setText}
+                  placeholder="Add a task"
+                  placeholderTextColor={theme.colors.textTertiary}
+                  selectionColor={theme.colors.primary}
+                  onSubmitEditing={handleAdd}
+                  returnKeyType="done"
+                  blurOnSubmit={false}
+                  style={{ padding: 0, ...theme.type.callout, color: theme.colors.text }}
+                />
+              </View>
+              <PressableScale
+                onPress={handleAdd}
+                disabled={!canAdd}
+                scaleTo={0.9}
+                feedback={null}
+                style={{
+                  width: 42,
+                  height: 42,
+                  borderRadius: theme.radius.md,
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  backgroundColor: canAdd ? theme.colors.primary : theme.colors.fill2,
+                }}
+              >
+                <Icon
+                  name="plus"
+                  size={19}
+                  color={canAdd ? '#FFFFFF' : theme.colors.textTertiary}
+                  weight={2.4}
+                />
+              </PressableScale>
+            </View>
+
+            <View style={{ flexDirection: 'row', gap: 7, marginTop: 9 }}>
+              <OptionChip
+                theme={theme}
+                glyph="dot"
+                label={priority.id === 'none' ? 'Priority' : priority.label}
+                active={priority.id !== 'none'}
+                color={priority.color}
+                onPress={() => setSheet('priority')}
+              />
+              <OptionChip
+                theme={theme}
+                icon={category ? category.icon : null}
+                glyph={category ? null : 'folder'}
+                label={category ? category.label : 'Category'}
+                active={!!category}
+                onPress={() => setSheet('category')}
+              />
+              <OptionChip
+                theme={theme}
+                glyph="calendar"
+                label={due.id === 'none' ? 'Date' : due.label}
+                active={due.id !== 'none'}
+                color={theme.colors.warning}
+                onPress={() => setSheet('due')}
+              />
+              <OptionChip
+                theme={theme}
+                glyph="repeat"
+                label={recurrence.id ? recurrence.label : 'Repeat'}
+                active={!!recurrence.id}
+                color={theme.colors.success}
+                onPress={() => setSheet('repeat')}
+              />
+            </View>
+          </View>
+        </Glass>
+      </Animated.View>
+
+      <ActionSheet
+        theme={theme}
+        visible={!!active}
+        onClose={() => setSheet(null)}
+        title={active ? active.title : ''}
+        value={active ? active.value : null}
+        options={active ? active.options : []}
+      />
+    </>
+  );
+}
+
+/** How tall the composer is, so the list underneath can clear it. */
+export const COMPOSER_HEIGHT = 104;
+
+const styles = StyleSheet.create({});

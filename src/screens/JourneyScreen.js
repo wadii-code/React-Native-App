@@ -4,10 +4,23 @@
  * yourself along the way (challenges).
  */
 import React, { useMemo, useState } from 'react';
-import { View, Text, ScrollView, TouchableOpacity } from 'react-native';
+import { View, Text, Animated } from 'react-native';
 import { useApp } from '../store/AppStore';
 import { useNav } from '../navigation';
-import { ScreenHeader, Segmented, Card, EmptyBlock, StatTile, Chip } from '../components/ui';
+import {
+  NavBar,
+  LargeTitle,
+  Segmented,
+  Card,
+  EmptyBlock,
+  StatTile,
+  Chip,
+  RoundButton,
+  FadeIn,
+  useScrollY,
+  useHeaderSpacer,
+} from '../components/ui';
+import { useTabBarHeight } from '../components/TabBar';
 import { CommitmentCard, GoalCard, ChallengeCard } from '../components/cards';
 import { CommitmentEditor, GoalEditor, ChallengeEditor } from '../components/editors';
 import { commitmentProgress, goalProgress, challengeStats } from '../domain/engine';
@@ -26,6 +39,9 @@ export default function JourneyScreen({ theme }) {
   const [segment, setSegment] = useState('commitments');
   const [editor, setEditor] = useState(null); // 'commitment' | 'goal' | 'challenge'
   const [challengeFilter, setChallengeFilter] = useState('current');
+  const { scrollY, onScroll, scrollEventThrottle } = useScrollY();
+  const headerSpace = useHeaderSpacer();
+  const tabBar = useTabBarHeight();
 
   const commitments = useMemo(
     () =>
@@ -58,59 +74,66 @@ export default function JourneyScreen({ theme }) {
     return challenges;
   }, [challenges, challengeFilter]);
 
-  const newLabel =
-    segment === 'commitments' ? '+ Commitment' : segment === 'goals' ? '+ Goal' : '+ Challenge';
+  const openEditor = () =>
+    setEditor(segment === 'commitments' ? 'commitment' : segment === 'goals' ? 'goal' : 'challenge');
+
+  const subtitle = {
+    commitments: 'What you are working to become',
+    goals: 'The checkpoints along the way',
+    challenges: 'The pushes you set yourself',
+  }[segment];
 
   return (
-    <View style={{ flex: 1 }}>
-      <ScreenHeader
+    <View style={{ flex: 1, backgroundColor: theme.colors.background }}>
+      <NavBar
         theme={theme}
         title="Journey"
-        subtitle="What you are working to become"
+        scrollY={scrollY}
+        threshold={54}
         right={
-          <TouchableOpacity
-            onPress={() =>
-              setEditor(segment === 'commitments' ? 'commitment' : segment === 'goals' ? 'goal' : 'challenge')
-            }
-            activeOpacity={0.8}
-            style={{
-              paddingHorizontal: 12,
-              paddingVertical: 9,
-              borderRadius: theme.borderRadius.md,
-              backgroundColor: theme.colors.primary,
-            }}
-          >
-            <Text style={{ color: '#FFF', fontWeight: '700', fontSize: theme.fontSize.xs }}>
-              {newLabel}
-            </Text>
-          </TouchableOpacity>
+          <RoundButton
+            theme={theme}
+            glyph="plus"
+            size={32}
+            weight={2.3}
+            color={theme.colors.primary}
+            fg="#FFFFFF"
+            onPress={openEditor}
+          />
         }
       />
 
-      <View style={{ paddingHorizontal: 20, paddingTop: 6 }}>
-        <Segmented theme={theme} options={SEGMENTS} value={segment} onChange={setSegment} />
-      </View>
+      <Animated.ScrollView
+        showsVerticalScrollIndicator={false}
+        onScroll={onScroll}
+        scrollEventThrottle={scrollEventThrottle}
+        contentContainerStyle={{ paddingTop: headerSpace, paddingBottom: tabBar + 32 }}
+      >
+        <LargeTitle theme={theme} title="Journey" subtitle={subtitle} />
 
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 120 }}>
+        <View style={{ paddingHorizontal: theme.screen, marginTop: 6 }}>
+          <Segmented theme={theme} options={SEGMENTS} value={segment} onChange={setSegment} />
+        </View>
+
         {segment === 'commitments' && (
-          <View style={{ paddingHorizontal: 20, marginTop: 18 }}>
-            {commitments.map((row) => (
-              <CommitmentCard
-                key={row.commitment.id}
-                theme={theme}
-                commitment={row.commitment}
-                progress={row.progress}
-                onPress={() => nav.navigate('commitmentDetail', { id: row.commitment.id })}
-              />
+          <View style={{ paddingHorizontal: theme.screen, marginTop: 20 }}>
+            {commitments.map((row, i) => (
+              <FadeIn key={row.commitment.id} delay={Math.min(i, 6) * 45}>
+                <CommitmentCard
+                  theme={theme}
+                  commitment={row.commitment}
+                  progress={row.progress}
+                  onPress={() => nav.navigate('commitmentDetail', { id: row.commitment.id })}
+                />
+              </FadeIn>
             ))}
             {!commitments.length && (
               <Card theme={theme}>
                 <EmptyBlock
                   theme={theme}
-                  compact
-                  icon="🌱"
-                  title="No commitments yet"
-                  sub="A commitment is the thing underneath everything else - 'I want to become physically fit', 'I want to reach B2 German'. Habits, tasks and challenges hang off it."
+                  glyph="target"
+                  title="Name what you are becoming."
+                  sub="A commitment is the thing underneath everything else — 'physically fit', 'fluent in German'. Habits, tasks and challenges hang off it."
                   actionLabel="Create a commitment"
                   onAction={() => setEditor('commitment')}
                 />
@@ -120,23 +143,24 @@ export default function JourneyScreen({ theme }) {
         )}
 
         {segment === 'goals' && (
-          <View style={{ paddingHorizontal: 20, marginTop: 18 }}>
-            {goals.map((row) => (
-              <GoalCard
-                key={row.goal.id}
-                theme={theme}
-                goal={row.goal}
-                progress={row.progress}
-                commitment={state.commitments.find((c) => c.id === row.goal.commitmentId)}
-                onPress={() => nav.navigate('goalDetail', { id: row.goal.id })}
-              />
+          <View style={{ paddingHorizontal: theme.screen, marginTop: 20 }}>
+            {goals.map((row, i) => (
+              <FadeIn key={row.goal.id} delay={Math.min(i, 6) * 45}>
+                <GoalCard
+                  theme={theme}
+                  goal={row.goal}
+                  progress={row.progress}
+                  commitment={state.commitments.find((c) => c.id === row.goal.commitmentId)}
+                  onPress={() => nav.navigate('goalDetail', { id: row.goal.id })}
+                />
+              </FadeIn>
             ))}
             {!goals.length && (
               <Card theme={theme}>
                 <EmptyBlock
                   theme={theme}
-                  compact
-                  icon="🎯"
+                  glyph="target"
+                  color={theme.colors.info}
                   title="No goals yet"
                   sub="Goals are the checkpoints on the way to a commitment: finish the course, build the portfolio, pass the exam."
                   actionLabel="Create a goal"
@@ -148,7 +172,7 @@ export default function JourneyScreen({ theme }) {
         )}
 
         {segment === 'challenges' && (
-          <View style={{ paddingHorizontal: 20, marginTop: 18 }}>
+          <View style={{ paddingHorizontal: theme.screen, marginTop: 20 }}>
             {!!challenges.length && (
               <>
                 <View style={{ flexDirection: 'row', gap: 10, marginBottom: 16 }}>
@@ -156,23 +180,24 @@ export default function JourneyScreen({ theme }) {
                     theme={theme}
                     label="Active"
                     value={challenges.filter((c) => c.stats.status === 'active').length}
-                    icon="🔥"
-                    color={theme.colors.success}
+                    glyph="flame"
+                    color={theme.colors.warning}
                   />
                   <StatTile
                     theme={theme}
                     label="Completed"
                     value={challenges.filter((c) => c.stats.status === 'completed').length}
-                    icon="🏅"
+                    glyph="check"
+                    color={theme.colors.success}
                   />
                   <StatTile
                     theme={theme}
                     label="Success rate"
                     value={`${successRate(challenges)}%`}
-                    icon="📊"
+                    glyph="chart"
                   />
                 </View>
-                <View style={{ flexDirection: 'row', gap: 8, marginBottom: 14 }}>
+                <View style={{ flexDirection: 'row', gap: 8, marginBottom: 16 }}>
                   {[
                     { id: 'current', label: 'Current' },
                     { id: 'done', label: 'Finished' },
@@ -190,24 +215,26 @@ export default function JourneyScreen({ theme }) {
               </>
             )}
 
-            {visibleChallenges.map((row) => (
-              <ChallengeCard
-                key={row.challenge.id}
-                theme={theme}
-                challenge={row.challenge}
-                stats={row.stats}
-                state={state}
-                onPress={() => nav.navigate('challengeDetail', { id: row.challenge.id })}
-              />
+            {visibleChallenges.map((row, i) => (
+              <FadeIn key={row.challenge.id} delay={Math.min(i, 6) * 45}>
+                <ChallengeCard
+                  theme={theme}
+                  challenge={row.challenge}
+                  stats={row.stats}
+                  state={state}
+                  today={today}
+                  onPress={() => nav.navigate('challengeDetail', { id: row.challenge.id })}
+                />
+              </FadeIn>
             ))}
 
             {!challenges.length && (
               <Card theme={theme}>
                 <EmptyBlock
                   theme={theme}
-                  compact
-                  icon="🔥"
-                  title="No challenges yet"
+                  glyph="flame"
+                  color={theme.colors.warning}
+                  title="Ready for your next challenge?"
                   sub="A challenge is a defined push: 30 days of coding, 21 days without procrastination. Link the habits you already track and it scores itself."
                   actionLabel="Start a challenge"
                   onAction={() => setEditor('challenge')}
@@ -217,14 +244,12 @@ export default function JourneyScreen({ theme }) {
 
             {!!challenges.length && !visibleChallenges.length && (
               <Card theme={theme}>
-                <Text style={{ color: theme.colors.textTertiary, textAlign: 'center' }}>
-                  Nothing here yet.
-                </Text>
+                <EmptyBlock theme={theme} compact glyph="flame" title="Nothing here yet" />
               </Card>
             )}
           </View>
         )}
-      </ScrollView>
+      </Animated.ScrollView>
 
       <CommitmentEditor
         theme={theme}

@@ -1,12 +1,34 @@
+/**
+ * A habit, in detail.
+ *
+ * The order is the order the question gets asked: did I do it today, how am I
+ * doing lately, what does the whole history look like, and what does keeping
+ * this actually serve.
+ */
 import React, { useMemo, useState } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, StyleSheet } from 'react-native';
-import * as Haptics from 'expo-haptics';
+import { View, Text, Animated, Pressable } from 'react-native';
 import { useApp } from '../store/AppStore';
 import { useNav } from '../navigation';
 import { withAlpha } from '../theme';
-import { Card, ScreenHeader, SectionTitle, StatTile, ProgressBar, Divider } from '../components/ui';
+import {
+  Card,
+  NavBar,
+  StatTile,
+  ProgressBar,
+  ListGroup,
+  ListRow,
+  Button,
+  Icon,
+  IconWell,
+  Divider,
+  FadeIn,
+  useScrollY,
+  useHeaderSpacer,
+  useSafeArea,
+  haptic,
+} from '../components/ui';
+import { Section, HabitCheck } from '../components/rows';
 import Heatmap, { HeatLegend, WeekStrip } from '../components/Heatmap';
-import { HabitCheckButton } from '../components/cards';
 import { HabitEditor } from '../components/editors';
 import { ConnectionSummary } from '../components/LinkPicker';
 import {
@@ -24,6 +46,9 @@ export default function HabitDetailScreen({ theme, params }) {
   const nav = useNav();
   const today = todayKey();
   const [editing, setEditing] = useState(false);
+  const { scrollY, onScroll, scrollEventThrottle } = useScrollY();
+  const headerSpace = useHeaderSpacer();
+  const insets = useSafeArea();
 
   const habit = state.habits.find((h) => h.id === params.id);
   const stats = useMemo(() => (habit ? habitStats(habit, index, today) : null), [habit, index, today]);
@@ -35,284 +60,279 @@ export default function HabitDetailScreen({ theme, params }) {
 
   if (!habit || !stats) {
     return (
-      <View style={{ flex: 1 }}>
-        <ScreenHeader theme={theme} title="Habit" onBack={nav.goBack} />
-        <Text style={{ padding: 20, color: theme.colors.textSecondary }}>This habit no longer exists.</Text>
+      <View style={{ flex: 1, backgroundColor: theme.colors.background }}>
+        <NavBar theme={theme} title="Habit" onBack={nav.goBack} alwaysSolid compactOnly />
+        <Text style={{ padding: 20, marginTop: headerSpace, ...theme.type.callout, color: theme.colors.textSecondary }}>
+          This habit no longer exists.
+        </Text>
       </View>
     );
   }
 
   const linkedTasks = state.tasks.filter((t) => t.links.habitId === habit.id);
-  const linkedChallenges = state.challenges.filter((c) =>
-    c.requirements.habitIds.includes(habit.id)
-  );
+  const linkedChallenges = state.challenges.filter((c) => c.requirements.habitIds.includes(habit.id));
+
+  const todayLabel = stats.doneToday
+    ? 'Done'
+    : habit.target > 1
+    ? `${stats.amountToday} of ${habit.target}${habit.unit ? ` ${habit.unit}` : ''}`
+    : stats.dueToday
+    ? 'Not yet'
+    : 'Not scheduled';
 
   return (
-    <View style={{ flex: 1 }}>
-      <ScreenHeader
+    <View style={{ flex: 1, backgroundColor: theme.colors.background }}>
+      <NavBar
         theme={theme}
-        title={`${habit.icon}  ${habit.name}`}
-        subtitle={`${scheduleLabel(habit.schedule)}${
-          habit.target > 1 ? ` · ${habit.target}${habit.unit ? ` ${habit.unit}` : ''} per day` : ''
-        }${habit.reminderTime != null ? ` · ${formatTime(habit.reminderTime)}` : ''}`}
+        title={habit.name}
+        scrollY={scrollY}
+        threshold={70}
         onBack={nav.goBack}
-        compact
-        right={
-          <TouchableOpacity
-            onPress={() => setEditing(true)}
-            style={{
-              paddingHorizontal: 14,
-              paddingVertical: 8,
-              borderRadius: theme.borderRadius.md,
-              backgroundColor: theme.colors.chip,
-            }}
-          >
-            <Text style={{ fontWeight: '600', fontSize: theme.fontSize.sm, color: theme.colors.text }}>
-              Edit
-            </Text>
-          </TouchableOpacity>
-        }
+        right={<Button theme={theme} label="Edit" variant="plain" size="sm" onPress={() => setEditing(true)} />}
       />
 
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 120 }}>
+      <Animated.ScrollView
+        showsVerticalScrollIndicator={false}
+        onScroll={onScroll}
+        scrollEventThrottle={scrollEventThrottle}
+        contentContainerStyle={{ paddingTop: headerSpace, paddingBottom: insets.bottom + 48 }}
+      >
         {/* ------------------------------------------------- check in */}
-        <View style={{ paddingHorizontal: 20, marginTop: 8 }}>
-          <Card theme={theme}>
-            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-              <View style={{ flex: 1 }}>
-                <Text style={{ fontSize: theme.fontSize.xs, fontWeight: '700', color: theme.colors.textTertiary, letterSpacing: 0.6 }}>
-                  TODAY
-                </Text>
-                <Text style={{ fontSize: theme.fontSize.lg, fontWeight: '700', color: theme.colors.text, marginTop: 4 }}>
-                  {stats.doneToday
-                    ? 'Done'
-                    : habit.target > 1
-                    ? `${stats.amountToday} of ${habit.target}${habit.unit ? ` ${habit.unit}` : ''}`
-                    : stats.dueToday
-                    ? 'Not yet'
-                    : 'Not scheduled'}
-                </Text>
-                {!!stats.period && (
-                  <Text style={{ fontSize: theme.fontSize.xs, color: theme.colors.textTertiary, marginTop: 4 }}>
-                    {stats.period.done}/{stats.period.target} this period
+        <FadeIn>
+          <View style={{ paddingHorizontal: theme.screen, marginTop: 6 }}>
+            <Card
+              theme={theme}
+              elevation="sm"
+              tint={withAlpha(habit.color, theme.dark ? 0.11 : 0.06)}
+              style={{ padding: 18 }}
+            >
+              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                <IconWell theme={theme} color={withAlpha(habit.color, theme.dark ? 0.26 : 0.16)} size={46}>
+                  <Text style={{ fontSize: 22 }}>{habit.icon}</Text>
+                </IconWell>
+                <View style={{ flex: 1, marginLeft: 13 }}>
+                  <Text numberOfLines={2} style={{ ...theme.type.title3, color: theme.colors.text }}>
+                    {habit.name}
                   </Text>
-                )}
+                  <Text style={{ ...theme.type.caption, color: theme.colors.textTertiary, marginTop: 3 }}>
+                    {scheduleLabel(habit.schedule)}
+                    {habit.target > 1 ? ` · ${habit.target}${habit.unit ? ` ${habit.unit}` : ''} a day` : ''}
+                    {habit.reminderTime != null ? ` · ${formatTime(habit.reminderTime)}` : ''}
+                  </Text>
+                </View>
               </View>
-              <HabitCheckButton
-                theme={theme}
-                habit={habit}
-                stats={stats}
-                size={54}
-                onCheck={() => actions.checkHabit(habit.id, habit.target || 1)}
-                onUncheck={() => actions.uncheckHabit(habit.id)}
-                onSetAmount={(amount) => actions.setHabitAmount(habit.id, amount)}
-              />
-            </View>
 
-            <View style={{ marginTop: 18 }}>
-              <WeekStrip theme={theme} data={week} color={habit.color} size={30} />
-            </View>
-          </Card>
-        </View>
+              <View
+                style={{
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  marginTop: 18,
+                  paddingTop: 16,
+                  borderTopWidth: 1,
+                  borderTopColor: withAlpha(habit.color, 0.16),
+                }}
+              >
+                <View style={{ flex: 1 }}>
+                  <Text style={{ ...theme.type.caption2, color: theme.colors.textTertiary }}>TODAY</Text>
+                  <Text style={{ ...theme.type.title2, color: theme.colors.text, marginTop: 3 }}>
+                    {todayLabel}
+                  </Text>
+                  {!!stats.period && (
+                    <Text style={{ ...theme.type.caption, color: theme.colors.textTertiary, marginTop: 4 }}>
+                      {stats.period.done}/{stats.period.target} this period
+                    </Text>
+                  )}
+                </View>
+                <HabitCheck
+                  theme={theme}
+                  habit={habit}
+                  stats={stats}
+                  size={54}
+                  onCheck={() => actions.checkHabit(habit.id, habit.target || 1)}
+                  onUncheck={() => actions.uncheckHabit(habit.id)}
+                  onSetAmount={(amount) => actions.setHabitAmount(habit.id, amount)}
+                />
+              </View>
 
-        {/* --------------------------------------------------- numbers */}
-        <View style={{ flexDirection: 'row', gap: 10, paddingHorizontal: 20, marginTop: 16 }}>
+              <View style={{ marginTop: 20 }}>
+                <WeekStrip theme={theme} data={week} color={habit.color} size={31} />
+              </View>
+            </Card>
+          </View>
+        </FadeIn>
+
+        <View style={{ flexDirection: 'row', gap: 10, paddingHorizontal: theme.screen, marginTop: 12 }}>
           <StatTile
             theme={theme}
             label="Current"
             value={`${stats.current}`}
             sub={stats.streakUnit === 'week' ? 'weeks' : 'days'}
-            icon="🔥"
+            glyph="flame"
             color={habit.color}
           />
-          <StatTile theme={theme} label="Best" value={`${stats.best}`} sub={stats.streakUnit === 'week' ? 'weeks' : 'days'} icon="🏆" />
-          <StatTile theme={theme} label="Consistency" value={`${stats.consistency}%`} icon="📈" />
+          <StatTile
+            theme={theme}
+            label="Best"
+            value={`${stats.best}`}
+            sub={stats.streakUnit === 'week' ? 'weeks' : 'days'}
+            glyph="sparkle"
+          />
+          <StatTile theme={theme} label="Consistency" value={`${stats.consistency}%`} glyph="chart" />
         </View>
 
         {/* --------------------------------------------------- heatmap */}
-        <View style={{ paddingHorizontal: 20, marginTop: 24 }}>
-          <SectionTitle theme={theme} title="History" />
+        <Section theme={theme} title="History">
           <Card theme={theme}>
             <Heatmap theme={theme} data={history} color={habit.color} />
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 12 }}>
-              <Text style={{ fontSize: theme.fontSize.xs, color: theme.colors.textTertiary }}>
+            <View
+              style={{
+                flexDirection: 'row',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                marginTop: 14,
+              }}
+            >
+              <Text style={{ ...theme.type.caption, color: theme.colors.textTertiary }}>
                 {stats.completed} of {stats.expected} scheduled days
               </Text>
               <HeatLegend theme={theme} color={habit.color} />
             </View>
           </Card>
-        </View>
+        </Section>
 
         {/* ---------------------------------------------- week / month */}
-        <View style={{ paddingHorizontal: 20, marginTop: 24 }}>
-          <SectionTitle theme={theme} title="Rhythm" />
+        <Section theme={theme} title="Rhythm">
           <Card theme={theme}>
-            <PeriodRow
-              theme={theme}
-              label="This week"
-              done={stats.week.done}
-              target={stats.week.target}
-              color={habit.color}
-            />
+            <PeriodRow theme={theme} label="This week" done={stats.week.done} target={stats.week.target} color={habit.color} />
             <Divider theme={theme} />
-            <PeriodRow
-              theme={theme}
-              label="This month"
-              done={stats.month.done}
-              target={stats.month.target}
-              color={habit.color}
-            />
+            <PeriodRow theme={theme} label="This month" done={stats.month.done} target={stats.month.target} color={habit.color} />
             <Divider theme={theme} />
             <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-              <Text style={{ fontSize: theme.fontSize.sm, color: theme.colors.textSecondary }}>
-                Total check-ins
-              </Text>
-              <Text style={{ fontSize: theme.fontSize.sm, fontWeight: '700', color: theme.colors.text }}>
+              <Text style={{ ...theme.type.subhead, color: theme.colors.textSecondary }}>Total check-ins</Text>
+              <Text style={{ ...theme.type.subheadEmph, color: theme.colors.text }}>
                 {stats.totalCompletions}
               </Text>
             </View>
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 10 }}>
-              <Text style={{ fontSize: theme.fontSize.sm, color: theme.colors.textSecondary }}>
-                Started
-              </Text>
-              <Text style={{ fontSize: theme.fontSize.sm, color: theme.colors.textSecondary }}>
+              <Text style={{ ...theme.type.subhead, color: theme.colors.textSecondary }}>Started</Text>
+              <Text style={{ ...theme.type.subhead, color: theme.colors.textSecondary }}>
                 {formatShortDate(habit.startDate)}
               </Text>
             </View>
           </Card>
-        </View>
+        </Section>
 
         {/* ------------------------------------------------ connections */}
-        <View style={{ paddingHorizontal: 20, marginTop: 24 }}>
-          <SectionTitle theme={theme} title="What this feeds" />
+        <Section theme={theme} title="What this feeds">
           <Card theme={theme}>
-            {habit.links.commitmentIds.length ||
-            habit.links.goalIds.length ||
-            linkedChallenges.length ? (
+            {habit.links.commitmentIds.length || habit.links.goalIds.length || linkedChallenges.length ? (
               <>
                 <ConnectionSummary theme={theme} state={state} links={habit.links} />
                 {linkedChallenges.map((c) => (
-                  <TouchableOpacity
+                  <ListRow
                     key={c.id}
+                    theme={theme}
+                    paddingHorizontal={0}
                     onPress={() => nav.navigate('challengeDetail', { id: c.id })}
-                    activeOpacity={0.7}
-                    style={{ flexDirection: 'row', alignItems: 'center', marginTop: 12 }}
                   >
-                    <Text style={{ fontSize: 15, marginRight: 8 }}>{c.icon}</Text>
-                    <Text style={{ flex: 1, fontSize: theme.fontSize.md, color: theme.colors.text }}>
-                      {c.name}
-                    </Text>
-                    <Text style={{ color: theme.colors.textTertiary }}>›</Text>
-                  </TouchableOpacity>
+                    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                      <Text style={{ fontSize: 15, marginRight: 9 }}>{c.icon}</Text>
+                      <Text style={{ flex: 1, ...theme.type.callout, color: theme.colors.text }}>{c.name}</Text>
+                      <Icon name="chevronRight" size={13} color={theme.colors.textQuaternary} weight={2} />
+                    </View>
+                  </ListRow>
                 ))}
               </>
             ) : (
-              <Text style={{ fontSize: theme.fontSize.sm, color: theme.colors.textTertiary }}>
-                This habit is not connected to anything yet. Link it to a commitment or challenge so
-                every check-in moves something bigger.
+              <Text style={{ ...theme.type.subhead, color: theme.colors.textTertiary, lineHeight: 20 }}>
+                This habit is not connected to anything yet. Link it to a commitment or challenge so every
+                check-in moves something bigger.
               </Text>
             )}
-            <TouchableOpacity onPress={() => setEditing(true)} style={{ marginTop: 14 }}>
-              <Text style={{ fontSize: theme.fontSize.sm, fontWeight: '600', color: theme.colors.primary }}>
-                Manage connections
-              </Text>
-            </TouchableOpacity>
+            <Button
+              theme={theme}
+              label="Manage connections"
+              variant="plain"
+              size="sm"
+              onPress={() => setEditing(true)}
+              style={{ marginTop: 10, paddingHorizontal: 0 }}
+            />
           </Card>
-        </View>
+        </Section>
 
         {!!habit.description && (
-          <View style={{ paddingHorizontal: 20, marginTop: 24 }}>
-            <SectionTitle theme={theme} title="Notes" />
+          <Section theme={theme} title="Notes">
             <Card theme={theme}>
-              <Text style={{ fontSize: theme.fontSize.md, color: theme.colors.textSecondary, lineHeight: 22 }}>
+              <Text style={{ ...theme.type.callout, color: theme.colors.textSecondary, lineHeight: 22 }}>
                 {habit.description}
               </Text>
             </Card>
-          </View>
+          </Section>
         )}
 
         {!!linkedTasks.length && (
-          <View style={{ paddingHorizontal: 20, marginTop: 24 }}>
-            <SectionTitle theme={theme} title="Tasks tracking this habit" />
-            <Card theme={theme}>
-              {linkedTasks.slice(0, 6).map((t, i) => (
-                <Text
-                  key={t.id}
-                  style={{
-                    fontSize: theme.fontSize.md,
-                    color: t.done ? theme.colors.textTertiary : theme.colors.text,
-                    paddingVertical: 6,
-                    borderBottomWidth: i === Math.min(linkedTasks.length, 6) - 1 ? 0 : StyleSheet.hairlineWidth,
-                    borderBottomColor: theme.colors.borderLight,
-                  }}
-                >
-                  {t.done ? '✓ ' : '○ '}
-                  {t.text}
-                </Text>
+          <Section theme={theme} title="Tasks tracking this habit">
+            <ListGroup theme={theme} inset={16}>
+              {linkedTasks.slice(0, 6).map((t) => (
+                <ListRow key={t.id} theme={theme} paddingVertical={10}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                    <Icon
+                      name={t.done ? 'check' : 'dot'}
+                      size={14}
+                      color={t.done ? theme.colors.success : theme.colors.textQuaternary}
+                      weight={2.2}
+                    />
+                    <Text
+                      style={{
+                        flex: 1,
+                        marginLeft: 11,
+                        ...theme.type.callout,
+                        color: t.done ? theme.colors.textTertiary : theme.colors.text,
+                      }}
+                    >
+                      {t.text}
+                    </Text>
+                  </View>
+                </ListRow>
               ))}
-            </Card>
-          </View>
+            </ListGroup>
+          </Section>
         )}
 
         {/* ---------------------------------------------- recent days */}
-        <View style={{ paddingHorizontal: 20, marginTop: 24 }}>
-          <SectionTitle theme={theme} title="Log the last few days" />
-          <Card theme={theme}>
+        <Section theme={theme} title="Log the last few days">
+          <ListGroup theme={theme} inset={16}>
             {history
               .slice(-7)
               .reverse()
-              .map((cell, i) => (
-                <View
-                  key={cell.key}
-                  style={{
-                    flexDirection: 'row',
-                    alignItems: 'center',
-                    paddingVertical: 9,
-                    borderBottomWidth: i === 6 ? 0 : StyleSheet.hairlineWidth,
-                    borderBottomColor: theme.colors.borderLight,
-                  }}
-                >
-                  <Text style={{ flex: 1, fontSize: theme.fontSize.sm, color: theme.colors.text }}>
-                    {formatFullDate(keyToTs(cell.key))}
-                  </Text>
-                  {!cell.scheduled && (
-                    <Text style={{ fontSize: 11, color: theme.colors.textTertiary, marginRight: 10 }}>
-                      not scheduled
+              .map((cell) => (
+                <ListRow key={cell.key} theme={theme} paddingVertical={9}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                    <Text style={{ flex: 1, ...theme.type.subhead, color: theme.colors.text }}>
+                      {cell.key === today ? 'Today' : formatFullDate(keyToTs(cell.key))}
                     </Text>
-                  )}
-                  <TouchableOpacity
-                    onPress={() => {
-                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                      if (isHabitDoneOn(habit, index, cell.key)) actions.uncheckHabit(habit.id, cell.key);
-                      else actions.checkHabit(habit.id, habit.target || 1, cell.key);
-                    }}
-                    activeOpacity={0.75}
-                    style={{
-                      width: 30,
-                      height: 30,
-                      borderRadius: 9,
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      backgroundColor: cell.done ? habit.color : withAlpha(habit.color, 0.1),
-                      borderWidth: cell.done ? 0 : 1,
-                      borderColor: withAlpha(habit.color, 0.3),
-                    }}
-                  >
-                    <Text
-                      style={{
-                        color: cell.done ? '#FFF' : habit.color,
-                        fontWeight: '700',
-                        fontSize: 13,
+                    {!cell.scheduled && (
+                      <Text style={{ ...theme.type.caption, color: theme.colors.textTertiary, marginRight: 12 }}>
+                        not scheduled
+                      </Text>
+                    )}
+                    <DayToggle
+                      theme={theme}
+                      habit={habit}
+                      cell={cell}
+                      amount={habitAmountOn(index, habit.id, cell.key)}
+                      onPress={() => {
+                        haptic('light');
+                        if (isHabitDoneOn(habit, index, cell.key)) actions.uncheckHabit(habit.id, cell.key);
+                        else actions.checkHabit(habit.id, habit.target || 1, cell.key);
                       }}
-                    >
-                      {cell.done ? '✓' : habitAmountOn(index, habit.id, cell.key) || '+'}
-                    </Text>
-                  </TouchableOpacity>
-                </View>
+                    />
+                  </View>
+                </ListRow>
               ))}
-          </Card>
-        </View>
-      </ScrollView>
+          </ListGroup>
+        </Section>
+      </Animated.ScrollView>
 
       <HabitEditor
         theme={theme}
@@ -327,16 +347,45 @@ export default function HabitDetailScreen({ theme, params }) {
   );
 }
 
+/* ---------------------------------------------------------------- parts */
+
 function PeriodRow({ theme, label, done, target, color }) {
   return (
     <View>
-      <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 }}>
-        <Text style={{ fontSize: theme.fontSize.sm, color: theme.colors.textSecondary }}>{label}</Text>
-        <Text style={{ fontSize: theme.fontSize.sm, fontWeight: '700', color: theme.colors.text }}>
+      <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 }}>
+        <Text style={{ ...theme.type.subhead, color: theme.colors.textSecondary }}>{label}</Text>
+        <Text style={{ ...theme.type.subheadEmph, color: theme.colors.text }}>
           {done}/{target}
         </Text>
       </View>
       <ProgressBar theme={theme} percent={target ? (done / target) * 100 : 0} color={color} height={6} />
     </View>
+  );
+}
+
+function DayToggle({ theme, habit, cell, amount, onPress }) {
+  return (
+    <Pressable
+      onPress={onPress}
+      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+      style={{
+        width: 32,
+        height: 32,
+        borderRadius: 10,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: cell.done ? habit.color : withAlpha(habit.color, theme.dark ? 0.16 : 0.09),
+        borderWidth: cell.done ? 0 : 1,
+        borderColor: withAlpha(habit.color, 0.3),
+      }}
+    >
+      {cell.done ? (
+        <Icon name="check" size={14} color="#FFFFFF" weight={2.2} />
+      ) : amount ? (
+        <Text style={{ ...theme.type.caption2, color: habit.color }}>{amount}</Text>
+      ) : (
+        <Icon name="plus" size={13} color={habit.color} weight={2.2} />
+      )}
+    </Pressable>
   );
 }

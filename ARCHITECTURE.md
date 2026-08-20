@@ -50,7 +50,10 @@ Every entity carries a `links` bag (`commitmentIds`, `goalIds`, `challengeIds`,
 | `src/store/AppStore.js` | one reducer for every mutation + debounced persistence |
 | `src/useTasks.js` | the original todo hook, now a view over the store |
 | `src/navigation.js` | hand-rolled tabs + one-level stack, Android back wired |
-| `src/screens/*` | Today, Tasks (+ Calendar), Habits, Journey, Stats, Settings, detail screens |
+| `src/theme.js` | the design system: colour, type ramp, radius, shadow, motion |
+| `src/components/ui/*` | the UI kit every screen is assembled from |
+| `src/components/*` | rows, cards, editors and pickers built on that kit |
+| `src/screens/*` | Today, Tasks (+ Calendar), Habits, Journey, Insights, Settings, detail screens |
 
 ## Streaks that understand the schedule
 
@@ -71,11 +74,44 @@ priority, category and due dates; string recurrence (`'daily'`) is upgraded to
 `{ type: 'daily' }`; already-completed tasks are backfilled into the activity log
 so history charts are not empty on day one.
 
+## The design system
+
+One file, `src/theme.js`, decides how the product looks: an iOS type ramp, four
+surface layers, translucent system fills, a radius scale, near-subliminal
+shadows and one set of motion constants. Screens never invent a value.
+
+`src/components/ui/` is the kit built on it, and every screen is assembled from
+it, which is what stops tasks, habits and challenges drifting apart visually:
+
+| Module | Responsibility |
+| --- | --- |
+| `platform.js` | safe-area insets, keyboard height, the glass material |
+| `icons.js` | the drawn glyph set - no emoji anywhere in the chrome |
+| `primitives.js` | surfaces, press feedback, grouped lists, skeletons, strike-through |
+| `controls.js` | chips, segmented control, checkbox, switch, buttons |
+| `progress.js` | rings, bars, day tracks, streaks - the app's main output |
+| `nav.js` | the large title that scrolls away and the bar it collapses into |
+| `inputs.js` | fields, search, the inline composer |
+| `sheet.js` | bottom sheets (drag to dismiss) and action sheets |
+| `feedback.js` | empty states, toasts, launch state |
+
+Two rules hold it together. **Glass is only for chrome that floats over
+content** - the tab bar, nav bars, the composer, sheet backdrops; content itself
+is always opaque. And **lists are inset groups, not stacks of cards**: one
+rounded surface per group, separators inset to the text.
+
 ## Dependencies
 
-None added. The app still runs on Expo 52 with AsyncStorage, gesture-handler,
-reanimated and haptics. Navigation, charts, heatmaps, the progress ring and the
-date/time pickers are all built from plain views.
+Still none added. The app runs on Expo 52 with AsyncStorage, gesture-handler,
+reanimated and haptics. Navigation, icons, charts, heatmaps, progress rings,
+sheets and the date/time pickers are all built from plain views and the
+built-in `Animated` API.
+
+Two optional packages are *detected* at runtime and used only if they are ever
+installed - `expo-blur` for a real blur material, and
+`react-native-safe-area-context` for exact insets. Without them the app falls
+back to a tuned translucent tint and a device-metrics inset guess, so nothing
+needs a native rebuild to keep working.
 
 ## Known limitation
 

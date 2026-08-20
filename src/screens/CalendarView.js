@@ -1,15 +1,28 @@
 /**
  * One calendar for everything: tasks, habit schedules, challenge windows,
  * milestones and the deadlines attached to goals and commitments.
+ *
+ * The month grid is drawn the way iOS draws one - a filled disc for the
+ * selection, a tinted disc for today, and small marks underneath for what the
+ * day holds - and the day's contents sit beneath it in inset lists rather than
+ * in a stack of separate cards.
  */
 import React, { useMemo, useState } from 'react';
-import { View, Text, TouchableOpacity, ScrollView, StyleSheet } from 'react-native';
-import * as Haptics from 'expo-haptics';
+import { View, Text, Animated, Pressable } from 'react-native';
 import { useApp } from '../store/AppStore';
 import { useNav } from '../navigation';
 import { withAlpha } from '../theme';
-import { Card, Checkbox } from '../components/ui';
-import { HabitCheckButton } from '../components/cards';
+import {
+  ListGroup,
+  ListRow,
+  Checkbox,
+  Icon,
+  PressableScale,
+  Card,
+  EmptyBlock,
+  haptic,
+} from '../components/ui';
+import { HabitCheck } from '../components/rows';
 import {
   monthMatrix,
   todayKey,
@@ -29,7 +42,14 @@ import {
 
 const WEEKDAY_LABELS = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
 
-export default function CalendarView({ theme, onOpenTask }) {
+export default function CalendarView({
+  theme,
+  onOpenTask,
+  header,
+  onScroll,
+  topInset = 0,
+  bottomInset = 120,
+}) {
   const { state, index, actions } = useApp();
   const nav = useNav();
   const today = todayKey();
@@ -110,11 +130,18 @@ export default function CalendarView({ theme, onOpenTask }) {
   );
 
   const shiftMonth = (delta) => {
-    Haptics.selectionAsync();
+    haptic('selection');
     setCursor((c) => {
       const d = new Date(c.year, c.month + delta, 1);
       return { year: d.getFullYear(), month: d.getMonth() };
     });
+  };
+
+  const jumpToToday = () => {
+    haptic('light');
+    const d = new Date();
+    setCursor({ year: d.getFullYear(), month: d.getMonth() });
+    setSelected(today);
   };
 
   const monthLabel = new Date(cursor.year, cursor.month, 1).toLocaleDateString('en-US', {
@@ -122,31 +149,43 @@ export default function CalendarView({ theme, onOpenTask }) {
     year: 'numeric',
   });
 
+  const nothing =
+    !selectedTasks.length && !selectedHabits.length && !selectedEvents.length && !selectedChallenges.length;
+
   return (
-    <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 120 }}>
-      <View style={{ paddingHorizontal: 20, paddingTop: 12 }}>
-        <Card theme={theme}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-            <TouchableOpacity onPress={() => shiftMonth(-1)} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
-              <Text style={{ fontSize: 20, color: theme.colors.textSecondary }}>‹</Text>
-            </TouchableOpacity>
-            <Text style={{ fontSize: theme.fontSize.lg, fontWeight: '700', color: theme.colors.text }}>
-              {monthLabel}
-            </Text>
-            <TouchableOpacity onPress={() => shiftMonth(1)} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
-              <Text style={{ fontSize: 20, color: theme.colors.textSecondary }}>›</Text>
-            </TouchableOpacity>
+    <Animated.ScrollView
+      showsVerticalScrollIndicator={false}
+      onScroll={onScroll}
+      scrollEventThrottle={16}
+      contentContainerStyle={{ paddingTop: topInset, paddingBottom: bottomInset }}
+    >
+      {header}
+
+      <View style={{ paddingHorizontal: theme.screen }}>
+        <Card theme={theme} style={{ padding: 14 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 2 }}>
+            <Text style={{ ...theme.type.title3, color: theme.colors.text }}>{monthLabel}</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+              <PressableScale onPress={jumpToToday} scaleTo={0.92} hitSlop={theme.hit} style={{ paddingHorizontal: 8 }}>
+                <Text style={{ ...theme.type.footnoteEmph, color: theme.colors.primary }}>Today</Text>
+              </PressableScale>
+              <PressableScale onPress={() => shiftMonth(-1)} scaleTo={0.85} style={{ padding: 6 }}>
+                <Icon name="chevronLeft" size={16} color={theme.colors.primary} weight={2.4} />
+              </PressableScale>
+              <PressableScale onPress={() => shiftMonth(1)} scaleTo={0.85} style={{ padding: 6 }}>
+                <Icon name="chevronRight" size={16} color={theme.colors.primary} weight={2.4} />
+              </PressableScale>
+            </View>
           </View>
 
-          <View style={{ flexDirection: 'row', marginTop: 14, marginBottom: 6 }}>
+          <View style={{ flexDirection: 'row', marginTop: 14, marginBottom: 4 }}>
             {WEEKDAY_LABELS.map((d, i) => (
               <Text
                 key={i}
                 style={{
                   flex: 1,
                   textAlign: 'center',
-                  fontSize: 11,
-                  fontWeight: '700',
+                  ...theme.type.caption2,
                   color: theme.colors.textTertiary,
                 }}
               >
@@ -158,19 +197,18 @@ export default function CalendarView({ theme, onOpenTask }) {
           {weeks.map((week, wi) => (
             <View key={wi} style={{ flexDirection: 'row' }}>
               {week.map((key, di) => {
-                if (!key) return <View key={di} style={{ flex: 1, height: 46 }} />;
+                if (!key) return <View key={di} style={{ flex: 1, height: 44 }} />;
                 const info = dayIndex.get(key);
                 const isToday = key === today;
                 const isSelected = key === selected;
                 return (
-                  <TouchableOpacity
+                  <Pressable
                     key={key}
                     onPress={() => {
-                      Haptics.selectionAsync();
+                      haptic('selection');
                       setSelected(key);
                     }}
-                    activeOpacity={0.7}
-                    style={{ flex: 1, height: 46, alignItems: 'center', justifyContent: 'center' }}
+                    style={{ flex: 1, height: 44, alignItems: 'center', justifyContent: 'center' }}
                   >
                     <View
                       style={{
@@ -182,31 +220,27 @@ export default function CalendarView({ theme, onOpenTask }) {
                         backgroundColor: isSelected
                           ? theme.colors.primary
                           : isToday
-                          ? withAlpha(theme.colors.primary, 0.14)
+                          ? withAlpha(theme.colors.primary, theme.dark ? 0.22 : 0.12)
                           : 'transparent',
                       }}
                     >
                       <Text
                         style={{
-                          fontSize: theme.fontSize.sm,
-                          fontWeight: isToday || isSelected ? '700' : '500',
-                          color: isSelected
-                            ? '#FFF'
-                            : isToday
-                            ? theme.colors.primary
-                            : theme.colors.text,
+                          ...theme.type.subhead,
+                          fontWeight: isToday || isSelected ? '700' : '400',
+                          color: isSelected ? '#FFF' : isToday ? theme.colors.primary : theme.colors.text,
                         }}
                       >
                         {Number(key.slice(8))}
                       </Text>
                     </View>
-                    <View style={{ flexDirection: 'row', gap: 2, height: 5, marginTop: 2 }}>
+                    <View style={{ flexDirection: 'row', gap: 3, height: 5, marginTop: 3 }}>
                       {!!info?.tasks && (
                         <Dot color={info.overdue ? theme.colors.danger : theme.colors.primary} />
                       )}
                       {!!info?.events.length && <Dot color={theme.colors.accent} />}
                     </View>
-                  </TouchableOpacity>
+                  </Pressable>
                 );
               })}
             </View>
@@ -215,182 +249,150 @@ export default function CalendarView({ theme, onOpenTask }) {
       </View>
 
       {/* ------------------------------------------------- selected day */}
-      <View style={{ paddingHorizontal: 20, marginTop: 20 }}>
-        <Text
-          style={{
-            fontSize: theme.fontSize.xs,
-            fontWeight: '700',
-            letterSpacing: 0.8,
-            textTransform: 'uppercase',
-            color: theme.colors.textSecondary,
-            marginBottom: 12,
-          }}
-        >
-          {formatFullDate(keyToTs(selected))}
+      <View style={{ paddingHorizontal: theme.screen, marginTop: 22 }}>
+        <Text style={{ ...theme.type.headline, color: theme.colors.text, marginBottom: 10, paddingHorizontal: 2 }}>
+          {selected === today ? 'Today' : formatFullDate(keyToTs(selected))}
         </Text>
 
-        {!selectedTasks.length &&
-          !selectedHabits.length &&
-          !selectedEvents.length &&
-          !selectedChallenges.length && (
-            <Card theme={theme}>
-              <Text style={{ fontSize: theme.fontSize.md, color: theme.colors.textTertiary, textAlign: 'center' }}>
-                Nothing scheduled.
-              </Text>
-            </Card>
-          )}
+        {nothing && (
+          <Card theme={theme}>
+            <EmptyBlock
+              theme={theme}
+              compact
+              glyph="calendar"
+              title="Nothing scheduled"
+              sub="This day is free."
+            />
+          </Card>
+        )}
 
         {!!selectedEvents.length && (
-          <Card theme={theme} style={{ marginBottom: 10 }}>
+          <ListGroup theme={theme} style={{ marginBottom: 12 }} inset={16}>
             {selectedEvents.map((e, i) => (
-              <View
-                key={i}
-                style={{
-                  flexDirection: 'row',
-                  alignItems: 'center',
-                  paddingVertical: 8,
-                  borderBottomWidth: i === selectedEvents.length - 1 ? 0 : StyleSheet.hairlineWidth,
-                  borderBottomColor: theme.colors.borderLight,
-                }}
-              >
-                <View
-                  style={{
-                    width: 8,
-                    height: 8,
-                    borderRadius: 4,
-                    backgroundColor: e.color,
-                    marginRight: 10,
-                  }}
-                />
-                <Text style={{ flex: 1, fontSize: theme.fontSize.md, color: theme.colors.text }}>
-                  {e.label}
-                </Text>
-              </View>
+              <ListRow key={i} theme={theme}>
+                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                  <View
+                    style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: e.color, marginRight: 12 }}
+                  />
+                  <Text style={{ flex: 1, ...theme.type.callout, color: theme.colors.text }}>{e.label}</Text>
+                </View>
+              </ListRow>
             ))}
-          </Card>
+          </ListGroup>
         )}
 
         {!!selectedTasks.length && (
-          <Card theme={theme} style={{ marginBottom: 10 }}>
-            {selectedTasks.map((task, i) => (
-              <View
-                key={task.id}
-                style={{
-                  flexDirection: 'row',
-                  alignItems: 'center',
-                  paddingVertical: 10,
-                  borderBottomWidth: i === selectedTasks.length - 1 ? 0 : StyleSheet.hairlineWidth,
-                  borderBottomColor: theme.colors.borderLight,
-                }}
-              >
-                <Checkbox
-                  theme={theme}
-                  checked={task.done}
-                  size={21}
-                  onPress={() => {
-                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                    actions.toggleTask(task.id);
-                  }}
-                />
-                <TouchableOpacity
-                  style={{ flex: 1, marginLeft: 12 }}
-                  activeOpacity={0.7}
-                  onPress={() => onOpenTask && onOpenTask(task)}
-                >
-                  <Text
-                    style={{
-                      fontSize: theme.fontSize.md,
-                      color: task.done ? theme.colors.textTertiary : theme.colors.text,
-                      textDecorationLine: task.done ? 'line-through' : 'none',
-                    }}
-                  >
-                    {task.text}
-                  </Text>
-                  {task.dueTime != null && (
-                    <Text style={{ fontSize: 11, color: theme.colors.textTertiary, marginTop: 2 }}>
-                      {formatTime(task.dueTime)}
+          <ListGroup theme={theme} style={{ marginBottom: 12 }} inset={50} header="Tasks">
+            {selectedTasks.map((task) => (
+              <ListRow key={task.id} theme={theme} onPress={() => onOpenTask && onOpenTask(task)}>
+                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                  <Checkbox
+                    theme={theme}
+                    checked={task.done}
+                    size={21}
+                    onPress={() => actions.toggleTask(task.id)}
+                  />
+                  <View style={{ flex: 1, marginLeft: 13 }}>
+                    <Text
+                      numberOfLines={1}
+                      style={{
+                        ...theme.type.callout,
+                        color: task.done ? theme.colors.textTertiary : theme.colors.text,
+                        textDecorationLine: task.done ? 'line-through' : 'none',
+                      }}
+                    >
+                      {task.text}
                     </Text>
-                  )}
-                </TouchableOpacity>
-              </View>
+                    {task.dueTime != null && (
+                      <Text style={{ ...theme.type.caption, color: theme.colors.textTertiary, marginTop: 2 }}>
+                        {formatTime(task.dueTime)}
+                      </Text>
+                    )}
+                  </View>
+                </View>
+              </ListRow>
             ))}
-          </Card>
+          </ListGroup>
         )}
 
         {!!selectedHabits.length && (
-          <Card theme={theme} style={{ marginBottom: 10 }}>
-            {selectedHabits.map((habit, i) => {
+          <ListGroup theme={theme} style={{ marginBottom: 12 }} inset={58} header="Habits">
+            {selectedHabits.map((habit) => {
               const stats = habitStats(habit, index, todayKey());
               const doneThatDay = isHabitDoneOn(habit, index, selected);
               return (
-                <View
+                <ListRow
                   key={habit.id}
-                  style={{
-                    flexDirection: 'row',
-                    alignItems: 'center',
-                    paddingVertical: 8,
-                    borderBottomWidth: i === selectedHabits.length - 1 ? 0 : StyleSheet.hairlineWidth,
-                    borderBottomColor: theme.colors.borderLight,
-                  }}
+                  theme={theme}
+                  onPress={() => nav.navigate('habitDetail', { id: habit.id })}
+                  paddingVertical={9}
                 >
-                  <Text style={{ fontSize: 16, marginRight: 10 }}>{habit.icon}</Text>
-                  <TouchableOpacity
-                    style={{ flex: 1 }}
-                    activeOpacity={0.7}
-                    onPress={() => nav.navigate('habitDetail', { id: habit.id })}
-                  >
-                    <Text style={{ fontSize: theme.fontSize.md, color: theme.colors.text }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                    <View
+                      style={{
+                        width: 30,
+                        height: 30,
+                        borderRadius: 10,
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        backgroundColor: withAlpha(habit.color, theme.dark ? 0.2 : 0.12),
+                        marginRight: 12,
+                      }}
+                    >
+                      <Text style={{ fontSize: 15 }}>{habit.icon}</Text>
+                    </View>
+                    <Text style={{ flex: 1, ...theme.type.callout, color: theme.colors.text }}>
                       {habit.name}
                     </Text>
-                  </TouchableOpacity>
-                  {selected <= today ? (
-                    <HabitCheckButton
-                      theme={theme}
-                      habit={habit}
-                      stats={{ ...stats, doneToday: doneThatDay, amountToday: 0 }}
-                      size={34}
-                      onCheck={() => actions.checkHabit(habit.id, habit.target || 1, selected)}
-                      onUncheck={() => actions.uncheckHabit(habit.id, selected)}
-                      onSetAmount={(amount) => actions.setHabitAmount(habit.id, amount, selected)}
-                    />
-                  ) : (
-                    <Text style={{ fontSize: 11, color: theme.colors.textTertiary }}>scheduled</Text>
-                  )}
-                </View>
+                    {selected <= today ? (
+                      <HabitCheck
+                        theme={theme}
+                        habit={habit}
+                        stats={{ ...stats, doneToday: doneThatDay, amountToday: 0 }}
+                        size={34}
+                        onCheck={() => actions.checkHabit(habit.id, habit.target || 1, selected)}
+                        onUncheck={() => actions.uncheckHabit(habit.id, selected)}
+                        onSetAmount={(amount) => actions.setHabitAmount(habit.id, amount, selected)}
+                      />
+                    ) : (
+                      <Text style={{ ...theme.type.caption, color: theme.colors.textTertiary }}>scheduled</Text>
+                    )}
+                  </View>
+                </ListRow>
               );
             })}
-          </Card>
+          </ListGroup>
         )}
 
         {!!selectedChallenges.length && (
-          <Card theme={theme}>
-            {selectedChallenges.map((row, i) => (
-              <TouchableOpacity
+          <ListGroup theme={theme} inset={16} header="Challenges">
+            {selectedChallenges.map((row) => (
+              <ListRow
                 key={row.challenge.id}
-                activeOpacity={0.7}
+                theme={theme}
                 onPress={() => nav.navigate('challengeDetail', { id: row.challenge.id })}
-                style={{
-                  flexDirection: 'row',
-                  alignItems: 'center',
-                  paddingVertical: 8,
-                  borderBottomWidth: i === selectedChallenges.length - 1 ? 0 : StyleSheet.hairlineWidth,
-                  borderBottomColor: theme.colors.borderLight,
-                }}
               >
-                <Text style={{ fontSize: 16, marginRight: 10 }}>{row.challenge.icon}</Text>
-                <Text style={{ flex: 1, fontSize: theme.fontSize.md, color: theme.colors.text }}>
-                  {row.challenge.name}
-                </Text>
-                <Text style={{ fontSize: 11, color: theme.colors.textTertiary }}>
-                  day {Math.max(1, Math.round((keyToTs(selected) - keyToTs(row.stats.startKey)) / 86400000) + 1)} /{' '}
-                  {row.stats.totalDays}
-                </Text>
-              </TouchableOpacity>
+                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                  <Text style={{ fontSize: 15, marginRight: 10 }}>{row.challenge.icon}</Text>
+                  <Text style={{ flex: 1, ...theme.type.callout, color: theme.colors.text }}>
+                    {row.challenge.name}
+                  </Text>
+                  <Text style={{ ...theme.type.caption, color: theme.colors.textTertiary, marginRight: 6 }}>
+                    day{' '}
+                    {Math.max(
+                      1,
+                      Math.round((keyToTs(selected) - keyToTs(row.stats.startKey)) / 86400000) + 1
+                    )}
+                    /{row.stats.totalDays}
+                  </Text>
+                  <Icon name="chevronRight" size={13} color={theme.colors.textQuaternary} weight={2} />
+                </View>
+              </ListRow>
             ))}
-          </Card>
+          </ListGroup>
         )}
       </View>
-    </ScrollView>
+    </Animated.ScrollView>
   );
 }
 

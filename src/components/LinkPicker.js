@@ -1,64 +1,74 @@
+/**
+ * Linking is what turns a list of chores into a system, so it is one control,
+ * in one place, with the same behaviour everywhere: chips that toggle, and a
+ * compact read-only summary of what a thing feeds.
+ */
 import React from 'react';
-import { View, Text, TouchableOpacity } from 'react-native';
-import * as Haptics from 'expo-haptics';
+import { View, Text, StyleSheet } from 'react-native';
 import { withAlpha } from '../theme';
 import { Field } from './ui';
+import { PressableScale } from './ui/primitives';
+import Icon from './ui/icons';
 
-/** Chips that toggle on and off - the one control used everywhere things link. */
+/* ---------------------------------------------------------------- select */
+
+function SelectChip({ theme, option, active, onPress }) {
+  const tint = option.color || theme.colors.primary;
+  return (
+    <PressableScale
+      onPress={onPress}
+      scaleTo={0.95}
+      style={{
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingHorizontal: 12,
+        paddingVertical: 10,
+        borderRadius: theme.radius.md,
+        borderWidth: 1.5,
+        backgroundColor: active ? withAlpha(tint, theme.dark ? 0.2 : 0.11) : theme.colors.fill1,
+        borderColor: active ? withAlpha(tint, 0.55) : 'transparent',
+      }}
+    >
+      {!!option.icon && <Text style={{ fontSize: 14, marginRight: 7 }}>{option.icon}</Text>}
+      <Text
+        numberOfLines={1}
+        style={{
+          ...theme.type.subhead,
+          maxWidth: 190,
+          fontWeight: active ? '600' : '500',
+          color: active ? tint : theme.colors.textSecondary,
+        }}
+      >
+        {option.label}
+      </Text>
+      {active && <Icon name="check" size={13} color={tint} weight={2.4} style={{ marginLeft: 7 }} />}
+    </PressableScale>
+  );
+}
+
 export function MultiSelect({ theme, options, values, onChange, emptyHint }) {
   if (!options.length) {
     return (
-      <Text style={{ fontSize: theme.fontSize.sm, color: theme.colors.textTertiary }}>
-        {emptyHint}
-      </Text>
+      <Text style={{ ...theme.type.subhead, color: theme.colors.textTertiary }}>{emptyHint}</Text>
     );
   }
   const selected = new Set(values || []);
   return (
     <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-      {options.map((opt) => {
-        const active = selected.has(opt.id);
-        const tint = opt.color || theme.colors.primary;
-        return (
-          <TouchableOpacity
-            key={opt.id}
-            activeOpacity={0.75}
-            onPress={() => {
-              Haptics.selectionAsync();
-              const next = new Set(selected);
-              if (next.has(opt.id)) next.delete(opt.id);
-              else next.add(opt.id);
-              onChange([...next]);
-            }}
-            style={{
-              flexDirection: 'row',
-              alignItems: 'center',
-              paddingHorizontal: 12,
-              paddingVertical: 9,
-              borderRadius: theme.borderRadius.md,
-              borderWidth: 1,
-              backgroundColor: active ? withAlpha(tint, 0.14) : theme.colors.inputBg,
-              borderColor: active ? tint : theme.colors.border,
-            }}
-          >
-            {!!opt.icon && <Text style={{ fontSize: 13, marginRight: 6 }}>{opt.icon}</Text>}
-            <Text
-              numberOfLines={1}
-              style={{
-                fontSize: theme.fontSize.sm,
-                maxWidth: 190,
-                fontWeight: active ? '600' : '500',
-                color: active ? tint : theme.colors.textSecondary,
-              }}
-            >
-              {opt.label}
-            </Text>
-            {active && (
-              <Text style={{ fontSize: 12, marginLeft: 6, color: tint, fontWeight: '700' }}>✓</Text>
-            )}
-          </TouchableOpacity>
-        );
-      })}
+      {options.map((opt) => (
+        <SelectChip
+          key={opt.id}
+          theme={theme}
+          option={opt}
+          active={selected.has(opt.id)}
+          onPress={() => {
+            const next = new Set(selected);
+            if (next.has(opt.id)) next.delete(opt.id);
+            else next.add(opt.id);
+            onChange([...next]);
+          }}
+        />
+      ))}
     </View>
   );
 }
@@ -67,53 +77,31 @@ export function SingleSelect({ theme, options, value, onChange, allowNone = true
   const all = allowNone ? [{ id: null, label: noneLabel }, ...options] : options;
   return (
     <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-      {all.map((opt) => {
-        const active = value === opt.id;
-        const tint = opt.color || theme.colors.primary;
-        return (
-          <TouchableOpacity
-            key={String(opt.id)}
-            activeOpacity={0.75}
-            onPress={() => {
-              Haptics.selectionAsync();
-              onChange(opt.id);
-            }}
-            style={{
-              flexDirection: 'row',
-              alignItems: 'center',
-              paddingHorizontal: 12,
-              paddingVertical: 9,
-              borderRadius: theme.borderRadius.md,
-              borderWidth: 1,
-              backgroundColor: active ? withAlpha(tint, 0.14) : theme.colors.inputBg,
-              borderColor: active ? tint : theme.colors.border,
-            }}
-          >
-            {!!opt.icon && <Text style={{ fontSize: 13, marginRight: 6 }}>{opt.icon}</Text>}
-            <Text
-              numberOfLines={1}
-              style={{
-                fontSize: theme.fontSize.sm,
-                maxWidth: 190,
-                fontWeight: active ? '600' : '500',
-                color: active ? tint : theme.colors.textSecondary,
-              }}
-            >
-              {opt.label}
-            </Text>
-          </TouchableOpacity>
-        );
-      })}
+      {all.map((opt) => (
+        <SelectChip
+          key={String(opt.id)}
+          theme={theme}
+          option={opt}
+          active={value === opt.id}
+          onPress={() => onChange(opt.id)}
+        />
+      ))}
     </View>
   );
 }
 
+/* ----------------------------------------------------------- connections */
+
 /**
- * The connection editor shared by tasks, habits and challenges. Linking is what
- * turns a list of chores into a system, so it is one control, in one place,
- * with the same behaviour everywhere.
+ * The connection editor shared by tasks, habits and challenges.
  */
-export function ConnectionsFields({ theme, state, links, onChange, show = ['commitments', 'goals', 'challenges'] }) {
+export function ConnectionsFields({
+  theme,
+  state,
+  links,
+  onChange,
+  show = ['commitments', 'goals', 'challenges'],
+}) {
   const commitmentOptions = state.commitments
     .filter((c) => c.status !== 'archived')
     .map((c) => ({ id: c.id, label: c.title, icon: c.icon, color: c.color }));
@@ -139,7 +127,7 @@ export function ConnectionsFields({ theme, state, links, onChange, show = ['comm
             options={commitmentOptions}
             values={links.commitmentIds}
             onChange={(ids) => onChange({ commitmentIds: ids })}
-            emptyHint="No commitments yet - create one in Journey."
+            emptyHint="No commitments yet — create one in Journey."
           />
         </Field>
       )}
@@ -170,7 +158,7 @@ export function ConnectionsFields({ theme, state, links, onChange, show = ['comm
 }
 
 /** A compact read-only summary of what an item feeds into. */
-export function ConnectionSummary({ theme, state, links, style, onPress }) {
+export function ConnectionSummary({ theme, state, links, style }) {
   const names = [];
   for (const id of links.commitmentIds || []) {
     const c = state.commitments.find((x) => x.id === id);
@@ -187,7 +175,7 @@ export function ConnectionSummary({ theme, state, links, style, onPress }) {
   if (!names.length) return null;
 
   return (
-    <View style={[{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }, style]}>
+    <View style={[{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, alignItems: 'center' }, style]}>
       {names.slice(0, 3).map((n, i) => (
         <View
           key={i}
@@ -196,17 +184,16 @@ export function ConnectionSummary({ theme, state, links, style, onPress }) {
             alignItems: 'center',
             paddingHorizontal: 7,
             paddingVertical: 3,
-            borderRadius: 7,
-            backgroundColor: withAlpha(n.color || theme.colors.primary, 0.12),
+            borderRadius: theme.radius.xs,
+            backgroundColor: withAlpha(n.color || theme.colors.primary, theme.dark ? 0.18 : 0.1),
           }}
         >
           <Text style={{ fontSize: 9, marginRight: 4 }}>{n.icon}</Text>
           <Text
             numberOfLines={1}
             style={{
-              fontSize: 11,
+              ...theme.type.caption2,
               maxWidth: 120,
-              fontWeight: '600',
               color: n.color || theme.colors.primary,
             }}
           >
@@ -215,10 +202,12 @@ export function ConnectionSummary({ theme, state, links, style, onPress }) {
         </View>
       ))}
       {names.length > 3 && (
-        <Text style={{ fontSize: 11, color: theme.colors.textTertiary, alignSelf: 'center' }}>
+        <Text style={{ ...theme.type.caption2, fontWeight: '500', color: theme.colors.textTertiary }}>
           +{names.length - 3}
         </Text>
       )}
     </View>
   );
 }
+
+export const linkStyles = StyleSheet.create({});

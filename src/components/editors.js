@@ -6,7 +6,7 @@
  * the habit of linking is built into the act of creating.
  */
 import React, { useEffect, useState } from 'react';
-import { View, Text, TouchableOpacity, ScrollView } from 'react-native';
+import { View, Text, ScrollView } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import {
   Sheet,
@@ -16,6 +16,8 @@ import {
   OptionRow,
   Chip,
   Divider,
+  Icon,
+  PressableScale,
 } from './ui';
 import { MultiSelect, SingleSelect, ConnectionsFields } from './LinkPicker';
 import { DateChoice, TimeChoice, NumberStepper, IconPicker, ColorPicker } from './pickers';
@@ -100,37 +102,38 @@ export function HabitEditor({ theme, visible, habit, state, actions, onClose, on
             {WEEKDAYS.map((day) => {
               const active = form.schedule.days.includes(day.id);
               return (
-                <TouchableOpacity
+                <PressableScale
                   key={day.id}
                   onPress={() => {
-                    Haptics.selectionAsync();
                     const days = active
                       ? form.schedule.days.filter((d) => d !== day.id)
                       : [...form.schedule.days, day.id];
                     setSchedule({ days });
                   }}
-                  activeOpacity={0.75}
+                  scaleTo={0.9}
                   style={{
                     flex: 1,
-                    height: 40,
-                    borderRadius: theme.borderRadius.sm,
+                    height: 42,
+                    borderRadius: theme.radius.sm,
                     alignItems: 'center',
                     justifyContent: 'center',
-                    backgroundColor: active ? withAlpha(form.color, 0.16) : theme.colors.inputBg,
-                    borderWidth: 1,
-                    borderColor: active ? form.color : theme.colors.border,
+                    backgroundColor: active
+                      ? withAlpha(form.color, theme.dark ? 0.24 : 0.14)
+                      : theme.colors.fill1,
+                    borderWidth: 1.5,
+                    borderColor: active ? withAlpha(form.color, 0.6) : 'transparent',
                   }}
                 >
                   <Text
                     style={{
-                      fontSize: theme.fontSize.sm,
+                      ...theme.type.footnoteEmph,
                       fontWeight: active ? '700' : '500',
                       color: active ? form.color : theme.colors.textSecondary,
                     }}
                   >
                     {day.letter}
                   </Text>
-                </TouchableOpacity>
+                </PressableScale>
               );
             })}
           </View>
@@ -145,7 +148,7 @@ export function HabitEditor({ theme, visible, habit, state, actions, onClose, on
               max={form.schedule.type === 'timesPerWeek' ? 7 : 31}
               suffix="×"
             />
-            <Text style={{ fontSize: theme.fontSize.xs, color: theme.colors.textTertiary, marginTop: 8 }}>
+            <Text style={{ ...theme.type.caption, color: theme.colors.textTertiary, marginTop: 8 }}>
               Missing one day will not break your streak - only the period counts.
             </Text>
           </View>
@@ -643,56 +646,60 @@ export function ChallengeEditor({ theme, visible, challenge, state, actions, onC
             style={{
               flexDirection: 'row',
               alignItems: 'center',
-              backgroundColor: theme.colors.inputBg,
-              borderRadius: theme.borderRadius.sm,
-              paddingHorizontal: 12,
-              paddingVertical: 10,
+              backgroundColor: theme.colors.fill1,
+              borderRadius: theme.radius.sm,
+              paddingHorizontal: 13,
+              paddingVertical: 12,
               marginBottom: 8,
             }}
           >
-            <Text style={{ flex: 1, fontSize: theme.fontSize.sm, color: theme.colors.text }}>
-              {rule}
-            </Text>
-            <TouchableOpacity
+            <Text style={{ flex: 1, ...theme.type.subhead, color: theme.colors.text }}>{rule}</Text>
+            <PressableScale
               onPress={() => set({ rules: form.rules.filter((_, idx) => idx !== i) })}
-              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              scaleTo={0.85}
+              hitSlop={theme.hit}
             >
-              <Text style={{ color: theme.colors.danger, fontWeight: '700' }}>✕</Text>
-            </TouchableOpacity>
+              <Icon name="close" size={12} color={theme.colors.danger} weight={2} />
+            </PressableScale>
           </View>
         ))}
-        <View style={{ flexDirection: 'row', gap: 8 }}>
-          <TextField
-            theme={theme}
-            value={ruleDraft}
-            onChangeText={setRuleDraft}
-            placeholder="No social media before noon"
-            style={{ flex: 1 }}
-            onSubmitEditing={() => {
-              if (!ruleDraft.trim()) return;
-              set({ rules: [...form.rules, ruleDraft.trim()] });
-              setRuleDraft('');
-            }}
-          />
-          <TouchableOpacity
+        <View style={{ flexDirection: 'row', gap: 10, alignItems: 'center' }}>
+          <View style={{ flex: 1 }}>
+            <TextField
+              theme={theme}
+              value={ruleDraft}
+              onChangeText={setRuleDraft}
+              placeholder="No social media before noon"
+              onSubmitEditing={() => {
+                if (!ruleDraft.trim()) return;
+                set({ rules: [...form.rules, ruleDraft.trim()] });
+                setRuleDraft('');
+              }}
+            />
+          </View>
+          <PressableScale
             onPress={() => {
               if (!ruleDraft.trim()) return;
-              Haptics.selectionAsync();
               set({ rules: [...form.rules, ruleDraft.trim()] });
               setRuleDraft('');
             }}
+            scaleTo={0.9}
             style={{
               width: 46,
-              borderRadius: theme.borderRadius.md,
+              height: 46,
+              borderRadius: theme.radius.md,
               alignItems: 'center',
               justifyContent: 'center',
-              backgroundColor: ruleDraft.trim() ? theme.colors.primary : theme.colors.chip,
+              backgroundColor: ruleDraft.trim() ? theme.colors.primary : theme.colors.fill2,
             }}
           >
-            <Text style={{ fontSize: 22, color: ruleDraft.trim() ? '#FFF' : theme.colors.textTertiary }}>
-              +
-            </Text>
-          </TouchableOpacity>
+            <Icon
+              name="plus"
+              size={18}
+              color={ruleDraft.trim() ? '#FFFFFF' : theme.colors.textTertiary}
+              weight={2.4}
+            />
+          </PressableScale>
         </View>
       </Field>
 
